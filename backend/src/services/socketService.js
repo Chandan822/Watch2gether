@@ -257,10 +257,18 @@ export const initSocketService = (io) => {
           .innerJoin(users, eq(roomMembers.userId, users.id))
           .where(eq(roomMembers.roomId, roomId));
 
-        const activeMembersWithStatus = activeMembers.map((member) => ({
-          ...member,
-          isOnline: isUserOnlineInRoom(member.id, roomId),
-        }));
+        // Deduplicate active members by userId
+        const seenUserIds = new Set();
+        const activeMembersWithStatus = [];
+        for (const member of activeMembers) {
+          if (!seenUserIds.has(member.id)) {
+            seenUserIds.add(member.id);
+            activeMembersWithStatus.push({
+              ...member,
+              isOnline: isUserOnlineInRoom(member.id, roomId),
+            });
+          }
+        }
 
         io.to(roomId).emit('room-users-update', activeMembersWithStatus);
 
@@ -1007,9 +1015,37 @@ export const initSocketService = (io) => {
             `👤 User "${currentUsername}" explicitly leaving room ${currentRoomId}`
           );
 
+          // Clean up voice channel if they were in it
+          const roomVoice = voiceChannels.get(currentRoomId);
+          if (roomVoice && roomVoice.has(socket.id)) {
+            roomVoice.delete(socket.id);
+            roomVoice.forEach((_, peerSocketId) => {
+              io.to(peerSocketId).emit('voice-user-left', {
+                userId: currentUserId,
+                socketId: socket.id,
+              });
+            });
+            const voiceParticipants = [...roomVoice.entries()].map(([sid, info]) => ({
+              socketId: sid,
+              userId: info.userId,
+              username: info.username,
+            }));
+            io.to(currentRoomId).emit('voice-participants-update', voiceParticipants);
+            if (roomVoice.size === 0) voiceChannels.delete(currentRoomId);
+            console.log(
+              `🔇 [Voice] ${currentUsername} auto-removed from voice on leaving room ${currentRoomId}`
+            );
+          }
+
+          // Delete all membership records for this user in this room to clear duplicates
           await db
             .delete(roomMembers)
-            .where(eq(roomMembers.id, currentMemberId));
+            .where(
+              and(
+                eq(roomMembers.roomId, currentRoomId),
+                eq(roomMembers.userId, currentUserId)
+              )
+            );
 
           const activeMembers = await db
             .select({
@@ -1021,10 +1057,18 @@ export const initSocketService = (io) => {
             .innerJoin(users, eq(roomMembers.userId, users.id))
             .where(eq(roomMembers.roomId, currentRoomId));
 
-          const activeMembersWithStatus = activeMembers.map((member) => ({
-            ...member,
-            isOnline: isUserOnlineInRoom(member.id, currentRoomId),
-          }));
+          // Deduplicate active members by userId
+          const seenUserIds = new Set();
+          const activeMembersWithStatus = [];
+          for (const member of activeMembers) {
+            if (!seenUserIds.has(member.id)) {
+              seenUserIds.add(member.id);
+              activeMembersWithStatus.push({
+                ...member,
+                isOnline: isUserOnlineInRoom(member.id, currentRoomId),
+              });
+            }
+          }
 
           io.to(currentRoomId).emit(
             'room-users-update',
@@ -1349,6 +1393,12 @@ export const initSocketService = (io) => {
 
       const roomVoice = voiceChannels.get(currentRoomId);
 
+      // Limit check: Max 6 users
+      if (roomVoice.size >= 6 && !roomVoice.has(socket.id)) {
+        socket.emit('voice-error', { message: 'Voice chat is full (maximum 6 participants).' });
+        return;
+      }
+
       // Tell every existing voice participant about the new peer so they can
       // initiate an RTCPeerConnection offer toward them.
       roomVoice.forEach((peerInfo, peerSocketId) => {
@@ -1495,10 +1545,18 @@ export const initSocketService = (io) => {
             .innerJoin(users, eq(roomMembers.userId, users.id))
             .where(eq(roomMembers.roomId, currentRoomId));
 
-          const activeMembersWithStatus = activeMembers.map((member) => ({
-            ...member,
-            isOnline: isUserOnlineInRoom(member.id, currentRoomId),
-          }));
+          // Deduplicate active members by userId
+          const seenUserIds = new Set();
+          const activeMembersWithStatus = [];
+          for (const member of activeMembers) {
+            if (!seenUserIds.has(member.id)) {
+              seenUserIds.add(member.id);
+              activeMembersWithStatus.push({
+                ...member,
+                isOnline: isUserOnlineInRoom(member.id, currentRoomId),
+              });
+            }
+          }
 
           io.to(currentRoomId).emit(
             'room-users-update',

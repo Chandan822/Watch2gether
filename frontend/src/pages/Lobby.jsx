@@ -42,6 +42,18 @@ const ROOM_TYPES = [
  */
 export default function Lobby() {
   const { user, fetchWithAuth } = useAuth();
+  const [activeRoom, setActiveRoom] = useState(null);
+
+  useEffect(() => {
+    const room = localStorage.getItem('activeRoom');
+    if (room) {
+      try {
+        setActiveRoom(JSON.parse(room));
+      } catch (e) {
+        console.error('Failed to parse activeRoom:', e);
+      }
+    }
+  }, []);
 
   // Create Room States
   const [roomName, setRoomName] = useState('');
@@ -267,6 +279,37 @@ export default function Lobby() {
 
   return (
     <div className="max-w-6xl mx-auto my-6 space-y-8 animate-fade-in px-4">
+
+      {/* Return to Active Room Banner */}
+      {activeRoom && (
+        <div className="bg-indigo-600/90 dark:bg-indigo-950/80 border border-indigo-500/30 text-white rounded-3xl p-5 shadow-lg backdrop-blur-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-left space-y-1">
+            <h4 className="text-sm font-bold font-display flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              <span>You have an active watch lounge session: &quot;{activeRoom.name}&quot;</span>
+            </h4>
+            <p className="text-[11px] text-indigo-200">You can return to the lounge or leave the session below.</p>
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => {
+                localStorage.removeItem('activeRoom');
+                setActiveRoom(null);
+                socket.emit('leave-room');
+              }}
+              className="flex-1 sm:flex-none px-4 py-2 bg-indigo-700/60 hover:bg-indigo-700 border border-indigo-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer text-center"
+            >
+              Leave Session
+            </button>
+            <button
+              onClick={() => navigate(`/room/${activeRoom.id}`)}
+              className="flex-1 sm:flex-none px-4 py-2 bg-white text-indigo-950 hover:bg-indigo-50 text-xs font-bold rounded-xl transition-all cursor-pointer text-center shadow-md"
+            >
+              Return to Lounge
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Hero Welcome Banner */}
       <div className="relative overflow-hidden rounded-3xl border border-slate-200 dark:border-slate-900 bg-gradient-to-r from-indigo-50 via-purple-50 to-slate-50 dark:from-indigo-950/30 dark:via-purple-950/20 dark:to-slate-900/40 p-8 shadow-2xl backdrop-blur-sm">

@@ -96,6 +96,10 @@ export default function Room() {
   
   const [voiceParticipants, setVoiceParticipants] = useState([]); 
   const [isInVoice, setIsInVoice] = useState(false);
+  const isInVoiceRef = useRef(false);
+  useEffect(() => {
+    isInVoiceRef.current = isInVoice;
+  }, [isInVoice]);
   const [isMuted, setIsMuted] = useState(false);
   const [speakingUsers, setSpeakingUsers] = useState(new Set()); 
   const [micError, setMicError] = useState('');
@@ -177,7 +181,10 @@ export default function Room() {
   const roomDataRef = useRef(roomData);
   useEffect(() => {
     roomDataRef.current = roomData;
-  }, [roomData]);
+    if (roomData) {
+      localStorage.setItem('activeRoom', JSON.stringify({ id: roomId, name: roomData.name }));
+    }
+  }, [roomData, roomId]);
 
   const hasRoomData = !!roomData;
 
@@ -267,12 +274,14 @@ export default function Room() {
     socket.on('user-kicked', ({ userId: kickedUserId }) => {
       if (user && kickedUserId === user.id) {
         alert('You have been kicked from this watch room by the Host.');
+        localStorage.removeItem('activeRoom');
         navigate('/');
       }
     });
 
     socket.on('room-deleted', ({ message }) => {
       alert(message || 'This watch room has been deleted by the Host.');
+      localStorage.removeItem('activeRoom');
       navigate('/');
     });
 
@@ -340,6 +349,16 @@ export default function Room() {
     socket.on('voice-ice-candidate', ({ from, candidate }) => {
       handleIceCandidateRef.current(from, candidate);
     });
+
+    socket.on('voice-error', ({ message }) => {
+      setMicError(message);
+      setIsInVoice(false);
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
+        localStreamRef.current = null;
+      }
+      stopSpeakingDetection();
+    });
     
 
     return () => {
@@ -363,6 +382,7 @@ export default function Room() {
       socket.off('voice-offer');
       socket.off('voice-answer');
       socket.off('voice-ice-candidate');
+      socket.off('voice-error');
       socket.off('video-processing');
       socket.emit('leave-room');
     };
@@ -631,9 +651,8 @@ export default function Room() {
   
   useEffect(() => {
     return () => {
-      if (isInVoice) leaveVoice();
+      if (isInVoiceRef.current) leaveVoice();
     };
-    
   }, []);
 
   
@@ -1108,11 +1127,17 @@ export default function Room() {
         const data = await res.json();
         throw new Error(data.message || 'Failed to delete room');
       }
+      localStorage.removeItem('activeRoom');
       navigate('/');
     } catch (err) {
       console.error(err);
       alert(err.message || 'Error deleting room');
     }
+  };
+
+  const handleLeaveRoom = () => {
+    localStorage.removeItem('activeRoom');
+    navigate('/');
   };
 
   
@@ -1307,7 +1332,7 @@ export default function Room() {
           )}
 
           <button
-            onClick={() => navigate('/')}
+            onClick={handleLeaveRoom}
             className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-900 hover:text-slate-800 dark:hover:text-slate-200 text-xs font-semibold rounded-xl transition-all active:scale-[0.98] cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />

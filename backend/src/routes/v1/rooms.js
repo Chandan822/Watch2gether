@@ -531,10 +531,17 @@ router.put('/:id/members/:userId', async (req, res, next) => {
       .innerJoin(users, eq(roomMembers.userId, users.id))
       .where(eq(roomMembers.roomId, id));
 
-    const activeMembersWithStatus = activeMembers.map((member) => ({
-      ...member,
-      isOnline: isUserOnlineInRoom(member.id, id),
-    }));
+    const seenUserIds = new Set();
+    const activeMembersWithStatus = [];
+    for (const member of activeMembers) {
+      if (!seenUserIds.has(member.id)) {
+        seenUserIds.add(member.id);
+        activeMembersWithStatus.push({
+          ...member,
+          isOnline: isUserOnlineInRoom(member.id, id),
+        });
+      }
+    }
 
     const io = req.app.get('io');
     if (io) {
@@ -617,10 +624,17 @@ router.delete('/:id/members/:userId', async (req, res, next) => {
       .innerJoin(users, eq(roomMembers.userId, users.id))
       .where(eq(roomMembers.roomId, id));
 
-    const activeMembersWithStatus = activeMembers.map((member) => ({
-      ...member,
-      isOnline: isUserOnlineInRoom(member.id, id),
-    }));
+    const seenUserIds = new Set();
+    const activeMembersWithStatus = [];
+    for (const member of activeMembers) {
+      if (!seenUserIds.has(member.id)) {
+        seenUserIds.add(member.id);
+        activeMembersWithStatus.push({
+          ...member,
+          isOnline: isUserOnlineInRoom(member.id, id),
+        });
+      }
+    }
 
     const io = req.app.get('io');
     if (io) {
