@@ -189,22 +189,51 @@ router.post('/profile/avatar', (req, res, next) => {
         });
       }
 
-      // Convert disk path './public/uploads/avatar...' to a public relative web path '/uploads/avatar...'
-      const avatarUrl = `/uploads/${req.file.filename}`;
+      // Convert disk path into Base64 Data URL
+      const filePath = req.file.path;
+      const fileBuffer = fs.readFileSync(filePath);
+      const base64Image = fileBuffer.toString('base64');
+      const base64DataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
 
-      // Update user record in Neon
+      // Query current user to fetch and delete old local avatar file if it exists
+      const [currentUser] = await db
+        .select({ avatarUrl: users.avatarUrl })
+        .from(users)
+        .where(eq(users.id, req.user.id))
+        .limit(1);
+
+      if (currentUser && currentUser.avatarUrl) {
+        // If it was a local path on disk, remove it
+        if (!currentUser.avatarUrl.startsWith('http') && !currentUser.avatarUrl.startsWith('data:')) {
+          const oldFilePath = `./public${currentUser.avatarUrl}`;
+          fs.unlink(oldFilePath, (err) => {
+            if (err) console.warn(`Could not delete old avatar: ${oldFilePath}`, err.message);
+          });
+        }
+      }
+
+      // Delete the newly uploaded temp file from disk immediately
+      fs.unlink(filePath, (err) => {
+        if (err) console.warn(`Could not delete temp uploaded file: ${filePath}`, err.message);
+      });
+
+      // Update user record in database with the base64 URL
       await db
         .update(users)
-        .set({ avatarUrl, updatedAt: new Date() })
+        .set({ avatarUrl: base64DataUrl, updatedAt: new Date() })
         .where(eq(users.id, req.user.id));
 
       res.status(200).json({
         status: 'success',
         data: {
-          avatarUrl,
+          avatarUrl: base64DataUrl,
         },
       });
     } catch (error) {
+      // Clean up temp file on failure
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       next(error);
     }
   });
@@ -224,8 +253,8 @@ router.delete('/profile/avatar', async (req, res, next) => {
       .limit(1);
 
     if (user && user.avatarUrl) {
-      // If the avatar is local, remove it from disk
-      if (!user.avatarUrl.startsWith('http')) {
+      // If the avatar is local disk path, remove it
+      if (!user.avatarUrl.startsWith('http') && !user.avatarUrl.startsWith('data:')) {
         const filePath = `./public${user.avatarUrl}`;
         fs.unlink(filePath, (err) => {
           if (err) {

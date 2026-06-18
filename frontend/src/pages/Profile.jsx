@@ -192,7 +192,7 @@ export default function Profile() {
   // Get full avatar path from backend host prefix if relative
   const hostUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
   const displayAvatar = profileData?.avatarUrl
-    ? (profileData.avatarUrl.startsWith('http') ? profileData.avatarUrl : `${hostUrl}${profileData.avatarUrl}`)
+    ? (profileData.avatarUrl.startsWith('http') || profileData.avatarUrl.startsWith('data:') ? profileData.avatarUrl : `${hostUrl}${profileData.avatarUrl}`)
     : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=256&h=256&q=80';
 
   return (

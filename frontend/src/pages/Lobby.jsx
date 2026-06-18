@@ -292,7 +292,7 @@ export default function Lobby() {
           <div className="shrink-0 flex items-center gap-3.5 p-4 bg-white/60 dark:bg-slate-950/45 border border-slate-200 dark:border-slate-900 rounded-2xl md:max-w-xs w-full md:w-auto">
             <div className="w-10 h-10 rounded-xl overflow-hidden border border-indigo-500/30 shadow-md shadow-indigo-500/5">
               <img
-                src={user?.avatarUrl ? (user.avatarUrl.startsWith('http') ? user.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${user.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
+                src={user?.avatarUrl ? (user.avatarUrl.startsWith('http') || user.avatarUrl.startsWith('data:') ? user.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${user.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
                 alt="Profile Avatar"
                 className="w-full h-full object-cover"
               />
@@ -601,7 +601,7 @@ export default function Lobby() {
                         <div className="relative">
                           <div className="w-7 h-7 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800">
                             <img
-                              src={friend.avatarUrl ? (friend.avatarUrl.startsWith('http') ? friend.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${friend.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
+                              src={friend.avatarUrl ? (friend.avatarUrl.startsWith('http') || friend.avatarUrl.startsWith('data:') ? friend.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${friend.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
                               alt="Friend Avatar"
                               className="w-full h-full object-cover"
                             />
@@ -638,7 +638,7 @@ export default function Lobby() {
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="w-7 h-7 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800">
                           <img
-                            src={reqItem.sender.avatarUrl ? (reqItem.sender.avatarUrl.startsWith('http') ? reqItem.sender.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${reqItem.sender.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
+                            src={reqItem.sender.avatarUrl ? (reqItem.sender.avatarUrl.startsWith('http') || reqItem.sender.avatarUrl.startsWith('data:') ? reqItem.sender.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${reqItem.sender.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
                             alt="Sender Avatar"
                             className="w-full h-full object-cover"
                           />

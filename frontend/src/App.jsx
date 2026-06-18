@@ -299,7 +299,7 @@ function Navbar() {
               <Link to="/profile" className="relative group focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-full shrink-0">
                 <div className="w-8 h-8 rounded-full overflow-hidden border border-indigo-500/40 shadow-md shadow-indigo-500/5 group-hover:border-indigo-400 group-hover:shadow-indigo-500/20 transition-all duration-200">
                   <img
-                    src={user.avatarUrl ? (user.avatarUrl.startsWith('http') ? user.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${user.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
+                    src={user.avatarUrl ? (user.avatarUrl.startsWith('http') || user.avatarUrl.startsWith('data:') ? user.avatarUrl : `${import.meta.env.VITE_WS_URL || 'http://localhost:3000'}${user.avatarUrl}`) : 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&w=64&h=64&q=80'}
                     alt="Navbar Profile Avatar"
                     className="w-full h-full object-cover"
                   />
