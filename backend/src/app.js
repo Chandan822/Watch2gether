@@ -43,6 +43,14 @@ app.use('/api/v1/rooms', requireAuth, roomsRouter);
 app.use('/api/v1/friends', requireAuth, friendsRouter);
 app.use('/api/v1/notifications', requireAuth, notificationsRouter);
 
+// Root Endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Welcome to the Watch2Gether Backend API',
+    status: 'healthy',
+  });
+});
+
 // Handle unknown route endpoints
 app.all('*', (req, res, next) => {
   const err = new Error(
