@@ -15,8 +15,10 @@ const dropTables = async () => {
   try {
     console.log('🔄 Connecting to database to clean up old tables...');
     await client.connect();
-    
-    await client.query('DROP TABLE IF EXISTS chat_messages, users, rooms CASCADE;');
+
+    await client.query(
+      'DROP TABLE IF EXISTS chat_messages, users, rooms CASCADE;'
+    );
     console.log('✅ Old tables dropped successfully.');
   } catch (error) {
     console.error('❌ Error dropping tables:', error);

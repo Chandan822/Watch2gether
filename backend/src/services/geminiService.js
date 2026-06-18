@@ -1,4 +1,3 @@
-
 /**
  * Call the Google Gemini API to generate content.
  * Uses the built-in global fetch to make direct REST API requests to Gemini 1.5 Flash.
@@ -6,7 +5,9 @@
 export const callGemini = async (prompt) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured on the server. Please set GEMINI_API_KEY in your .env file.');
+    throw new Error(
+      'Gemini API key is not configured on the server. Please set GEMINI_API_KEY in your .env file.'
+    );
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
@@ -31,7 +32,8 @@ export const callGemini = async (prompt) => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const message = errorData?.error?.message || `HTTP error! status: ${response.status}`;
+    const message =
+      errorData?.error?.message || `HTTP error! status: ${response.status}`;
     throw new Error(`Gemini API Error: ${message}`);
   }
 
@@ -91,7 +93,7 @@ The JSON structure must match this exact schema:
 ]`;
 
   const text = await callGemini(prompt);
-  
+
   // Clean markdown wrap code blocks if present (often model ignores "no ```" instructions)
   let cleanedText = text
     .replace(/```json/gi, '')
@@ -105,14 +107,21 @@ The JSON structure must match this exact schema:
     }
     // Simple validation of choices
     quiz.forEach((q) => {
-      if (!q.question || !Array.isArray(q.options) || q.options.length !== 4 || typeof q.correctIndex !== 'number') {
+      if (
+        !q.question ||
+        !Array.isArray(q.options) ||
+        q.options.length !== 4 ||
+        typeof q.correctIndex !== 'number'
+      ) {
         throw new Error('Invalid quiz question fields.');
       }
     });
     return quiz;
   } catch (err) {
     console.error('Failed to parse Gemini quiz JSON. Raw response:', text);
-    throw new Error('The AI assistant generated an invalid format for the quiz. Please try again.');
+    throw new Error(
+      'The AI assistant generated an invalid format for the quiz. Please try again.'
+    );
   }
 };
 

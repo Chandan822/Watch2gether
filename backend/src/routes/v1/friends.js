@@ -2,7 +2,11 @@ import { Router } from 'express';
 import { db } from '../../db/index.js';
 import { friendships, friendRequests, users } from '../../db/schema.js';
 import { eq, and, or } from 'drizzle-orm';
-import { isUserOnline, createNotification, onlineUsers } from '../../services/socketService.js';
+import {
+  isUserOnline,
+  createNotification,
+  onlineUsers,
+} from '../../services/socketService.js';
 
 const router = Router();
 
@@ -26,7 +30,12 @@ router.get('/', async (req, res, next) => {
       })
       .from(friendships)
       .innerJoin(users, eq(users.id, friendships.friendId))
-      .where(and(eq(friendships.userId, currentUserId), eq(friendships.status, 'active')));
+      .where(
+        and(
+          eq(friendships.userId, currentUserId),
+          eq(friendships.status, 'active')
+        )
+      );
 
     // 2. Where current user is friendId (joining user details of userId)
     const friendsAsFriend = await db
@@ -39,10 +48,15 @@ router.get('/', async (req, res, next) => {
       })
       .from(friendships)
       .innerJoin(users, eq(users.id, friendships.userId))
-      .where(and(eq(friendships.friendId, currentUserId), eq(friendships.status, 'active')));
+      .where(
+        and(
+          eq(friendships.friendId, currentUserId),
+          eq(friendships.status, 'active')
+        )
+      );
 
     // Merge both arrays and append status
-    const allFriends = [...friendsAsUser, ...friendsAsFriend].map(friend => ({
+    const allFriends = [...friendsAsUser, ...friendsAsFriend].map((friend) => ({
       ...friend,
       isOnline: isUserOnline(friend.id),
     }));
@@ -73,11 +87,16 @@ router.get('/requests', async (req, res, next) => {
           id: users.id,
           username: users.username,
           avatarUrl: users.avatarUrl,
-        }
+        },
       })
       .from(friendRequests)
       .innerJoin(users, eq(users.id, friendRequests.senderId))
-      .where(and(eq(friendRequests.receiverId, currentUserId), eq(friendRequests.status, 'pending')));
+      .where(
+        and(
+          eq(friendRequests.receiverId, currentUserId),
+          eq(friendRequests.status, 'pending')
+        )
+      );
 
     // Outgoing requests (sent)
     const sent = await db
@@ -88,11 +107,16 @@ router.get('/requests', async (req, res, next) => {
           id: users.id,
           username: users.username,
           avatarUrl: users.avatarUrl,
-        }
+        },
       })
       .from(friendRequests)
       .innerJoin(users, eq(users.id, friendRequests.receiverId))
-      .where(and(eq(friendRequests.senderId, currentUserId), eq(friendRequests.status, 'pending')));
+      .where(
+        and(
+          eq(friendRequests.senderId, currentUserId),
+          eq(friendRequests.status, 'pending')
+        )
+      );
 
     res.status(200).json({
       status: 'success',
@@ -143,8 +167,14 @@ router.post('/requests', async (req, res, next) => {
       .from(friendships)
       .where(
         or(
-          and(eq(friendships.userId, senderId), eq(friendships.friendId, recipient.id)),
-          and(eq(friendships.userId, recipient.id), eq(friendships.friendId, senderId))
+          and(
+            eq(friendships.userId, senderId),
+            eq(friendships.friendId, recipient.id)
+          ),
+          and(
+            eq(friendships.userId, recipient.id),
+            eq(friendships.friendId, senderId)
+          )
         )
       )
       .limit(1);
@@ -161,8 +191,14 @@ router.post('/requests', async (req, res, next) => {
       .from(friendRequests)
       .where(
         or(
-          and(eq(friendRequests.senderId, senderId), eq(friendRequests.receiverId, recipient.id)),
-          and(eq(friendRequests.senderId, recipient.id), eq(friendRequests.receiverId, senderId))
+          and(
+            eq(friendRequests.senderId, senderId),
+            eq(friendRequests.receiverId, recipient.id)
+          ),
+          and(
+            eq(friendRequests.senderId, recipient.id),
+            eq(friendRequests.receiverId, senderId)
+          )
         )
       )
       .limit(1);
@@ -170,8 +206,8 @@ router.post('/requests', async (req, res, next) => {
     if (existingRequest) {
       const isUsSender = existingRequest.senderId === senderId;
       const err = new Error(
-        isUsSender 
-          ? 'You have already sent a pending friend request to this user' 
+        isUsSender
+          ? 'You have already sent a pending friend request to this user'
           : 'This user has already sent you a pending friend request'
       );
       err.statusCode = 409;
@@ -236,7 +272,12 @@ router.put('/requests/:id', async (req, res, next) => {
     const [request] = await db
       .select()
       .from(friendRequests)
-      .where(and(eq(friendRequests.id, id), eq(friendRequests.receiverId, receiverId)))
+      .where(
+        and(
+          eq(friendRequests.id, id),
+          eq(friendRequests.receiverId, receiverId)
+        )
+      )
       .limit(1);
 
     if (!request) {
@@ -247,19 +288,15 @@ router.put('/requests/:id', async (req, res, next) => {
 
     if (action === 'accept') {
       // Create friendship
-      await db
-        .insert(friendships)
-        .values({
-          userId: request.senderId,
-          friendId: request.receiverId,
-          status: 'active',
-        });
+      await db.insert(friendships).values({
+        userId: request.senderId,
+        friendId: request.receiverId,
+        status: 'active',
+      });
     }
 
     // Delete request row
-    await db
-      .delete(friendRequests)
-      .where(eq(friendRequests.id, id));
+    await db.delete(friendRequests).where(eq(friendRequests.id, id));
 
     // Emit friends-updated to both sender and receiver
     const io = req.app.get('io');
@@ -294,10 +331,15 @@ router.delete('/:friendshipId', async (req, res, next) => {
     const [friendship] = await db
       .select()
       .from(friendships)
-      .where(and(
-        eq(friendships.id, friendshipId),
-        or(eq(friendships.userId, currentUserId), eq(friendships.friendId, currentUserId))
-      ))
+      .where(
+        and(
+          eq(friendships.id, friendshipId),
+          or(
+            eq(friendships.userId, currentUserId),
+            eq(friendships.friendId, currentUserId)
+          )
+        )
+      )
       .limit(1);
 
     if (!friendship) {
@@ -307,9 +349,7 @@ router.delete('/:friendshipId', async (req, res, next) => {
     }
 
     // Delete friendship
-    await db
-      .delete(friendships)
-      .where(eq(friendships.id, friendshipId));
+    await db.delete(friendships).where(eq(friendships.id, friendshipId));
 
     // Emit friends-updated to both friends
     const io = req.app.get('io');

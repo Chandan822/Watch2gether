@@ -15,9 +15,11 @@ const alterUsersTable = async () => {
   try {
     console.log('🔄 Connecting to database to alter users table...');
     await client.connect();
-    
+
     // Add the new profile column if it does not exist
-    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url text;');
+    await client.query(
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url text;'
+    );
     console.log('✅ avatar_url column added to users table successfully.');
   } catch (error) {
     console.error('❌ Error altering users table:', error);

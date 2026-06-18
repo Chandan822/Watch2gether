@@ -14,7 +14,7 @@ const app = express();
 
 /**
  * Express Middleware Chain
- * 
+ *
  * 1. CORS Configuration: restricts requests to valid clients.
  * 2. Static Assets: serves local file uploads.
  * 3. Body Parsers: reads incoming json/urlencoded streams.
@@ -45,7 +45,9 @@ app.use('/api/v1/notifications', requireAuth, notificationsRouter);
 
 // Handle unknown route endpoints
 app.all('*', (req, res, next) => {
-  const err = new Error(`Route handler for ${req.method} ${req.originalUrl} not found`);
+  const err = new Error(
+    `Route handler for ${req.method} ${req.originalUrl} not found`
+  );
   err.statusCode = 404;
   next(err);
 });

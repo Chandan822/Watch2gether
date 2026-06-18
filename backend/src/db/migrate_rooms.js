@@ -11,14 +11,14 @@ const migrateRoomsTable = async () => {
   try {
     console.log('🔄 Connecting to Neon database for migration...');
     await client.connect();
-    
+
     // Add visibility column if it does not exist
     console.log('adding visibility column...');
     await client.query(`
       ALTER TABLE rooms 
       ADD COLUMN IF NOT EXISTS visibility varchar(30) DEFAULT 'public' NOT NULL;
     `);
-    
+
     // Add visibility index if it does not exist
     console.log('creating visibility index...');
     await client.query(`

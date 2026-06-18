@@ -4,22 +4,26 @@ import { db } from '../../db/index.js';
 import { users } from '../../db/schema.js';
 import { eq, or } from 'drizzle-orm';
 import { validateBody } from '../../middleware/validator.js';
-import { 
-  hashPassword, 
-  comparePassword, 
-  generateAccessToken, 
+import {
+  hashPassword,
+  comparePassword,
+  generateAccessToken,
   generateRefreshToken,
-  verifyRefreshToken 
+  verifyRefreshToken,
 } from '../../services/authService.js';
 
 const router = Router();
 
 // Zod schema rules for registration
 const registerSchema = z.object({
-  username: z.string()
+  username: z
+    .string()
     .min(3, 'Username must be at least 3 characters')
     .max(30)
-    .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain alphanumeric characters and underscores'),
+    .regex(
+      /^[a-zA-Z0-9_]+$/,
+      'Username can only contain alphanumeric characters and underscores'
+    ),
   email: z.string().email('Invalid email address format'),
   password: z.string().min(6, 'Password must be at least 6 characters long'),
 });
@@ -42,65 +46,69 @@ const REFRESH_COOKIE_OPTS = {
  * 1. User Registration Route
  * POST /api/v1/auth/register
  */
-router.post('/register', validateBody(registerSchema), async (req, res, next) => {
-  try {
-    const { username, email, password } = req.body;
+router.post(
+  '/register',
+  validateBody(registerSchema),
+  async (req, res, next) => {
+    try {
+      const { username, email, password } = req.body;
 
-    // Check if username or email is already registered in DB
-    const existingUsers = await db
-      .select()
-      .from(users)
-      .where(or(eq(users.username, username), eq(users.email, email)))
-      .limit(1);
+      // Check if username or email is already registered in DB
+      const existingUsers = await db
+        .select()
+        .from(users)
+        .where(or(eq(users.username, username), eq(users.email, email)))
+        .limit(1);
 
-    if (existingUsers.length > 0) {
-      const err = new Error('Username or Email is already registered');
-      err.statusCode = 409; // HTTP Conflict
-      throw err;
-    }
+      if (existingUsers.length > 0) {
+        const err = new Error('Username or Email is already registered');
+        err.statusCode = 409; // HTTP Conflict
+        throw err;
+      }
 
-    // Hash the password securely
-    const passwordHash = await hashPassword(password);
+      // Hash the password securely
+      const passwordHash = await hashPassword(password);
 
-    // Save the new user record
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        username,
-        email,
-        passwordHash,
-      })
-      .returning();
+      // Save the new user record
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          username,
+          email,
+          passwordHash,
+        })
+        .returning();
 
-    // Generate JWT access and refresh token strings
-    const accessToken = generateAccessToken(newUser);
-    const refreshToken = generateRefreshToken(newUser);
+      // Generate JWT access and refresh token strings
+      const accessToken = generateAccessToken(newUser);
+      const refreshToken = generateRefreshToken(newUser);
 
-    // Store the refresh token in the database to allow session verification
-    await db
-      .update(users)
-      .set({ refreshToken })
-      .where(eq(users.id, newUser.id));
+      // Store the refresh token in the database to allow session verification
+      await db
+        .update(users)
+        .set({ refreshToken })
+        .where(eq(users.id, newUser.id));
 
-    // Set HttpOnly refresh cookie and send access token
-    res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTS);
-    
-    res.status(201).json({
-      status: 'success',
-      data: {
-        accessToken,
-        user: {
-          id: newUser.id,
-          username: newUser.username,
-          email: newUser.email,
-          avatarUrl: newUser.avatarUrl,
+      // Set HttpOnly refresh cookie and send access token
+      res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTS);
+
+      res.status(201).json({
+        status: 'success',
+        data: {
+          accessToken,
+          user: {
+            id: newUser.id,
+            username: newUser.username,
+            email: newUser.email,
+            avatarUrl: newUser.avatarUrl,
+          },
         },
-      },
-    });
-  } catch (error) {
-    next(error);
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 /**
  * 2. User Login Route
@@ -135,13 +143,10 @@ router.post('/login', validateBody(loginSchema), async (req, res, next) => {
     const refreshToken = generateRefreshToken(user);
 
     // Record refresh token in the database
-    await db
-      .update(users)
-      .set({ refreshToken })
-      .where(eq(users.id, user.id));
+    await db.update(users).set({ refreshToken }).where(eq(users.id, user.id));
 
     res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTS);
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -170,8 +175,10 @@ router.post('/refresh', async (req, res, _next) => {
     const targetCookie = cookiesHeader
       .split(';')
       .find((c) => c.trim().startsWith('refreshToken='));
-    
-    const refreshToken = targetCookie ? targetCookie.split('=')[1].trim() : null;
+
+    const refreshToken = targetCookie
+      ? targetCookie.split('=')[1].trim()
+      : null;
 
     if (!refreshToken) {
       // Return 401 directly for guests visiting the site without active logins
@@ -211,7 +218,7 @@ router.post('/refresh', async (req, res, _next) => {
       .where(eq(users.id, user.id));
 
     res.cookie('refreshToken', newRefreshToken, REFRESH_COOKIE_OPTS);
-    
+
     return res.status(200).json({
       status: 'success',
       data: {
@@ -238,13 +245,15 @@ router.post('/logout', async (req, res, next) => {
     const targetCookie = cookiesHeader
       .split(';')
       .find((c) => c.trim().startsWith('refreshToken='));
-    
-    const refreshToken = targetCookie ? targetCookie.split('=')[1].trim() : null;
+
+    const refreshToken = targetCookie
+      ? targetCookie.split('=')[1].trim()
+      : null;
 
     if (refreshToken) {
       try {
         const decoded = verifyRefreshToken(refreshToken);
-        
+
         // Remove token from database record on logout
         await db
           .update(users)

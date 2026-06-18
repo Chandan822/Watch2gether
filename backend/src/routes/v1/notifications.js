@@ -117,9 +117,7 @@ router.delete('/', async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    await db
-      .delete(notifications)
-      .where(eq(notifications.userId, userId));
+    await db.delete(notifications).where(eq(notifications.userId, userId));
 
     res.status(200).json({
       status: 'success',

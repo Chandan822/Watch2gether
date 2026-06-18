@@ -3,46 +3,79 @@ import { z } from 'zod';
 import fs from 'fs';
 import bcrypt from 'bcrypt';
 import { db } from '../../db/index.js';
-import { rooms, roomMembers, users, roomInvitations, messages, messageReactions, friendships, sessionNotes } from '../../db/schema.js';
+import {
+  rooms,
+  roomMembers,
+  users,
+  roomInvitations,
+  messages,
+  messageReactions,
+  friendships,
+  sessionNotes,
+} from '../../db/schema.js';
 import { eq, and, inArray, or, desc } from 'drizzle-orm';
 import { validateBody } from '../../middleware/validator.js';
 import { uploadPdf, uploadVideo } from '../../middleware/upload.js';
-import { isUserOnlineInRoom, onlineUsers, createNotification, aiSessions } from '../../services/socketService.js';
-import { generateVideoSummary, generateDiscussionQuestions, generateQuiz, explainStudyTopic } from '../../services/geminiService.js';
+import {
+  isUserOnlineInRoom,
+  onlineUsers,
+  createNotification,
+  aiSessions,
+} from '../../services/socketService.js';
+import {
+  generateVideoSummary,
+  generateDiscussionQuestions,
+  generateQuiz,
+  explainStudyTopic,
+} from '../../services/geminiService.js';
 import { convertToHls } from '../../services/hlsService.js';
 
 const router = Router();
 
 // Zod validation rules for room creation inputs
-const createRoomSchema = z.object({
-  name: z.string()
-    .min(3, 'Room name must be at least 3 characters')
-    .max(50, 'Room name cannot exceed 50 characters')
-    .trim(),
-  roomTypeCode: z.enum([
-    'movie_night',
-    'youtube_party',
-    'study_group',
-    'coding_session',
-    'gaming_party',
-    'music_party',
-    'community_event',
-    'custom'
-  ], {
-    errorMap: () => ({ message: 'Invalid room type code selected' })
-  }),
-  visibility: z.enum(['public', 'private', 'password_protected']).default('public'),
-  password: z.string().optional(),
-  isAiEnabled: z.boolean().default(false),
-}).refine((data) => {
-  if (data.visibility === 'password_protected' && (!data.password || data.password.trim() === '')) {
-    return false;
-  }
-  return true;
-}, {
-  message: 'Password is required for password protected rooms',
-  path: ['password'],
-});
+const createRoomSchema = z
+  .object({
+    name: z
+      .string()
+      .min(3, 'Room name must be at least 3 characters')
+      .max(50, 'Room name cannot exceed 50 characters')
+      .trim(),
+    roomTypeCode: z.enum(
+      [
+        'movie_night',
+        'youtube_party',
+        'study_group',
+        'coding_session',
+        'gaming_party',
+        'music_party',
+        'community_event',
+        'custom',
+      ],
+      {
+        errorMap: () => ({ message: 'Invalid room type code selected' }),
+      }
+    ),
+    visibility: z
+      .enum(['public', 'private', 'password_protected'])
+      .default('public'),
+    password: z.string().optional(),
+    isAiEnabled: z.boolean().default(false),
+  })
+  .refine(
+    (data) => {
+      if (
+        data.visibility === 'password_protected' &&
+        (!data.password || data.password.trim() === '')
+      ) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'Password is required for password protected rooms',
+      path: ['password'],
+    }
+  );
 
 /**
  * List Public Rooms
@@ -102,13 +135,11 @@ router.post('/', validateBody(createRoomSchema), async (req, res, next) => {
       .returning();
 
     // Insert host membership record for the creator
-    await db
-      .insert(roomMembers)
-      .values({
-        roomId: newRoom.id,
-        userId: req.user.id,
-        role: 'host',
-      });
+    await db.insert(roomMembers).values({
+      roomId: newRoom.id,
+      userId: req.user.id,
+      role: 'host',
+    });
 
     // Notify all active friends that user has started a room
     try {
@@ -121,12 +152,17 @@ router.post('/', validateBody(createRoomSchema), async (req, res, next) => {
         .from(friendships)
         .where(
           and(
-            or(eq(friendships.userId, creatorId), eq(friendships.friendId, creatorId)),
+            or(
+              eq(friendships.userId, creatorId),
+              eq(friendships.friendId, creatorId)
+            ),
             eq(friendships.status, 'active')
           )
         );
 
-      const friendIds = friends.map(f => f.userId === creatorId ? f.friendId : f.userId);
+      const friendIds = friends.map((f) =>
+        f.userId === creatorId ? f.friendId : f.userId
+      );
 
       for (const friendId of friendIds) {
         await createNotification({
@@ -138,7 +174,10 @@ router.post('/', validateBody(createRoomSchema), async (req, res, next) => {
         });
       }
     } catch (err) {
-      console.error('⚠️ Failed to send friend_started_room notifications:', err);
+      console.error(
+        '⚠️ Failed to send friend_started_room notifications:',
+        err
+      );
     }
 
     res.status(201).json({
@@ -184,7 +223,7 @@ router.post('/:id/join', async (req, res, next) => {
       return res.status(200).json({
         status: 'success',
         message: 'Already joined',
-        data: { role: existingMember.role }
+        data: { role: existingMember.role },
       });
     }
 
@@ -217,7 +256,7 @@ router.post('/:id/join', async (req, res, next) => {
     res.status(200).json({
       status: 'success',
       message: 'Successfully joined room',
-      data: { role: newMember.role }
+      data: { role: newMember.role },
     });
   } catch (error) {
     next(error);
@@ -264,15 +303,13 @@ router.get('/:id', async (req, res, next) => {
           message: 'Password is required to join this room',
         });
       }
-      
+
       // If it is a public or private room, auto-join as a member!
-      await db
-        .insert(roomMembers)
-        .values({
-          roomId: id,
-          userId: userId,
-          role: 'member',
-        });
+      await db.insert(roomMembers).values({
+        roomId: id,
+        userId: userId,
+        role: 'member',
+      });
     }
 
     // Refetch the role of the user (or newly created member)
@@ -286,7 +323,7 @@ router.get('/:id', async (req, res, next) => {
       status: 'success',
       data: {
         ...room,
-        currentUserRole: finalMember?.role || 'member'
+        currentUserRole: finalMember?.role || 'member',
       },
     });
   } catch (error) {
@@ -328,13 +365,13 @@ router.delete('/:id', async (req, res, next) => {
       throw err;
     }
 
-    await db
-      .delete(rooms)
-      .where(eq(rooms.id, id));
+    await db.delete(rooms).where(eq(rooms.id, id));
 
     const io = req.app.get('io');
     if (io) {
-      io.to(id).emit('room-deleted', { message: 'The host has deleted the room.' });
+      io.to(id).emit('room-deleted', {
+        message: 'The host has deleted the room.',
+      });
     }
 
     res.status(200).json({
@@ -380,7 +417,9 @@ router.post('/:id/invitations', async (req, res, next) => {
       throw err;
     }
 
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const token =
+      Math.random().toString(36).substring(2, 15) +
+      Math.random().toString(36).substring(2, 15);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const [invitation] = await db
@@ -453,7 +492,9 @@ router.put('/:id/members/:userId', async (req, res, next) => {
     const [currentMember] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, id), eq(roomMembers.userId, currentUserId)))
+      .where(
+        and(eq(roomMembers.roomId, id), eq(roomMembers.userId, currentUserId))
+      )
       .limit(1);
 
     if (!currentMember || currentMember.role !== 'host') {
@@ -505,7 +546,7 @@ router.put('/:id/members/:userId', async (req, res, next) => {
         content: `"${targetUser.username}" was set to ${role} by Host.`,
         createdAt: new Date(),
       });
-      
+
       io.to(id).emit('user-role-changed', { userId, role });
     }
 
@@ -530,7 +571,9 @@ router.delete('/:id/members/:userId', async (req, res, next) => {
     const [currentMember] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, id), eq(roomMembers.userId, currentUserId)))
+      .where(
+        and(eq(roomMembers.roomId, id), eq(roomMembers.userId, currentUserId))
+      )
       .limit(1);
 
     if (!currentMember || currentMember.role !== 'host') {
@@ -540,7 +583,9 @@ router.delete('/:id/members/:userId', async (req, res, next) => {
     }
 
     if (currentUserId === userId) {
-      const err = new Error('The Host cannot kick themselves. Use Delete Room instead.');
+      const err = new Error(
+        'The Host cannot kick themselves. Use Delete Room instead.'
+      );
       err.statusCode = 400;
       throw err;
     }
@@ -710,7 +755,9 @@ const getAiEnabledRoom = async (roomId, userId) => {
     .limit(1);
 
   if (!member) {
-    const err = new Error('You must be a member of the room to interact with the AI Assistant');
+    const err = new Error(
+      'You must be a member of the room to interact with the AI Assistant'
+    );
     err.statusCode = 403;
     throw err;
   }
@@ -728,11 +775,19 @@ router.post('/:id/ai/summary', async (req, res, next) => {
     await getAiEnabledRoom(roomId, req.user.id);
     const { videoTitle, videoUrl } = req.body;
 
-    const summary = await generateVideoSummary(videoTitle || 'Current Video', videoUrl);
+    const summary = await generateVideoSummary(
+      videoTitle || 'Current Video',
+      videoUrl
+    );
 
     // Save to in-memory session cache
     if (!aiSessions.has(roomId)) {
-      aiSessions.set(roomId, { summary: null, questions: null, quiz: null, explanations: [] });
+      aiSessions.set(roomId, {
+        summary: null,
+        questions: null,
+        quiz: null,
+        explanations: [],
+      });
     }
     aiSessions.get(roomId).summary = summary;
 
@@ -758,11 +813,19 @@ router.post('/:id/ai/questions', async (req, res, next) => {
     await getAiEnabledRoom(roomId, req.user.id);
     const { videoTitle, videoUrl } = req.body;
 
-    const questions = await generateDiscussionQuestions(videoTitle || 'Current Video', videoUrl);
+    const questions = await generateDiscussionQuestions(
+      videoTitle || 'Current Video',
+      videoUrl
+    );
 
     // Save to in-memory session cache
     if (!aiSessions.has(roomId)) {
-      aiSessions.set(roomId, { summary: null, questions: null, quiz: null, explanations: [] });
+      aiSessions.set(roomId, {
+        summary: null,
+        questions: null,
+        quiz: null,
+        explanations: [],
+      });
     }
     aiSessions.get(roomId).questions = questions;
 
@@ -792,7 +855,12 @@ router.post('/:id/ai/quiz', async (req, res, next) => {
 
     // Save to in-memory session cache
     if (!aiSessions.has(roomId)) {
-      aiSessions.set(roomId, { summary: null, questions: null, quiz: null, explanations: [] });
+      aiSessions.set(roomId, {
+        summary: null,
+        questions: null,
+        quiz: null,
+        explanations: [],
+      });
     }
     aiSessions.get(roomId).quiz = quiz;
 
@@ -824,11 +892,19 @@ router.post('/:id/ai/explain', async (req, res, next) => {
       throw err;
     }
 
-    const explanation = await explainStudyTopic(videoTitle || 'Current Video', query.trim());
+    const explanation = await explainStudyTopic(
+      videoTitle || 'Current Video',
+      query.trim()
+    );
 
     // Save to in-memory explanations feed
     if (!aiSessions.has(roomId)) {
-      aiSessions.set(roomId, { summary: null, questions: null, quiz: null, explanations: [] });
+      aiSessions.set(roomId, {
+        summary: null,
+        questions: null,
+        quiz: null,
+        explanations: [],
+      });
     }
     const explanationItem = {
       id: Math.random().toString(36).substring(2, 9),
@@ -882,7 +958,9 @@ router.post('/:id/pdf', uploadPdf.single('pdf'), async (req, res, next) => {
     const [member] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .where(
+        and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+      )
       .limit(1);
 
     if (!member || (member.role !== 'host' && member.role !== 'co-host')) {
@@ -899,7 +977,7 @@ router.post('/:id/pdf', uploadPdf.single('pdf'), async (req, res, next) => {
       .update(rooms)
       .set({
         activePdfUrl: pdfUrl,
-        activePdfPage: 1
+        activePdfPage: 1,
       })
       .where(eq(rooms.id, roomId));
 
@@ -912,7 +990,7 @@ router.post('/:id/pdf', uploadPdf.single('pdf'), async (req, res, next) => {
     res.status(200).json({
       status: 'success',
       message: 'PDF uploaded successfully',
-      data: { pdfUrl, page: 1 }
+      data: { pdfUrl, page: 1 },
     });
   } catch (error) {
     next(error);
@@ -923,100 +1001,112 @@ router.post('/:id/pdf', uploadPdf.single('pdf'), async (req, res, next) => {
  * Upload local video and convert it to HLS segments
  * POST /api/v1/rooms/:id/video
  */
-router.post('/:id/video', uploadVideo.single('video'), async (req, res, next) => {
-  try {
-    const roomId = req.params.id;
-    const userId = req.user.id;
+router.post(
+  '/:id/video',
+  uploadVideo.single('video'),
+  async (req, res, next) => {
+    try {
+      const roomId = req.params.id;
+      const userId = req.user.id;
 
-    if (!req.file) {
-      const err = new Error('Video file is required');
-      err.statusCode = 400;
-      throw err;
-    }
-
-    // Check room accessibility & user permissions
-    const [room] = await db
-      .select()
-      .from(rooms)
-      .where(eq(rooms.id, roomId))
-      .limit(1);
-
-    if (!room) {
-      const err = new Error('Room not found');
-      err.statusCode = 404;
-      throw err;
-    }
-
-    const [member] = await db
-      .select()
-      .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
-      .limit(1);
-
-    if (!member || (member.role !== 'host' && member.role !== 'co-host')) {
-      const err = new Error('Only Hosts and Co-hosts can upload local video files');
-      err.statusCode = 403;
-      throw err;
-    }
-
-    // Prepare output directory for HLS segments
-    const timestamp = Date.now();
-    const outputDirName = `hls-${roomId}-${timestamp}`;
-    const outputDir = `./public/uploads/${outputDirName}`;
-
-    const io = req.app.get('io');
-
-    // Run background conversion
-    convertToHls({
-      inputPath: req.file.path,
-      outputDir,
-      io,
-      roomId,
-      onComplete: async (relativeUrl) => {
-        try {
-          // Update rooms database values
-          await db
-            .update(rooms)
-            .set({
-              videoUrl: relativeUrl,
-              videoState: 'paused',
-              videoTime: 0
-            })
-            .where(eq(rooms.id, roomId));
-
-          // Emit sync socket event to update video source in real-time
-          if (io) {
-            io.to(roomId).emit('video-state-change', {
-              action: 'pause',
-              time: 0,
-              videoUrl: relativeUrl
-            });
-            
-            // Send system message
-            io.to(roomId).emit('message-received', {
-              id: Math.random().toString(),
-              username: 'System',
-              content: `A new local video was successfully processed and loaded.`,
-              createdAt: new Date()
-            });
-          }
-        } catch (dbErr) {
-          console.error('⚠️ Failed to update database with HLS video URL:', dbErr);
-        }
-      },
-      onError: (err) => {
-        console.error('⚠️ Local video conversion failed:', err);
+      if (!req.file) {
+        const err = new Error('Video file is required');
+        err.statusCode = 400;
+        throw err;
       }
-    });
 
-    res.status(200).json({
-      status: 'success',
-      message: 'Video upload completed. Processing starting in the background...'
-    });
-  } catch (error) {
-    next(error);
+      // Check room accessibility & user permissions
+      const [room] = await db
+        .select()
+        .from(rooms)
+        .where(eq(rooms.id, roomId))
+        .limit(1);
+
+      if (!room) {
+        const err = new Error('Room not found');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const [member] = await db
+        .select()
+        .from(roomMembers)
+        .where(
+          and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+        )
+        .limit(1);
+
+      if (!member || (member.role !== 'host' && member.role !== 'co-host')) {
+        const err = new Error(
+          'Only Hosts and Co-hosts can upload local video files'
+        );
+        err.statusCode = 403;
+        throw err;
+      }
+
+      // Prepare output directory for HLS segments
+      const timestamp = Date.now();
+      const outputDirName = `hls-${roomId}-${timestamp}`;
+      const outputDir = `./public/uploads/${outputDirName}`;
+
+      const io = req.app.get('io');
+
+      // Run background conversion
+      convertToHls({
+        inputPath: req.file.path,
+        outputDir,
+        io,
+        roomId,
+        onComplete: async (relativeUrl) => {
+          try {
+            // Update rooms database values
+            await db
+              .update(rooms)
+              .set({
+                videoUrl: relativeUrl,
+                videoState: 'paused',
+                videoTime: 0,
+              })
+              .where(eq(rooms.id, roomId));
+
+            // Emit sync socket event to update video source in real-time
+            if (io) {
+              io.to(roomId).emit('video-state-change', {
+                action: 'pause',
+                time: 0,
+                videoUrl: relativeUrl,
+              });
+
+              // Send system message
+              io.to(roomId).emit('message-received', {
+                id: Math.random().toString(),
+                username: 'System',
+                content: `A new local video was successfully processed and loaded.`,
+                createdAt: new Date(),
+              });
+            }
+          } catch (dbErr) {
+            console.error(
+              '⚠️ Failed to update database with HLS video URL:',
+              dbErr
+            );
+          }
+        },
+        onError: (err) => {
+          console.error('⚠️ Local video conversion failed:', err);
+        },
+      });
+
+      res.status(200).json({
+        status: 'success',
+        message:
+          'Video upload completed. Processing starting in the background...',
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 /**
  * Delete uploaded HLS video files to free space
@@ -1043,11 +1133,15 @@ router.delete('/:id/video', async (req, res, next) => {
     const [member] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .where(
+        and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+      )
       .limit(1);
 
     if (!member || (member.role !== 'host' && member.role !== 'co-host')) {
-      const err = new Error('Only Hosts and Co-hosts can delete the uploaded video');
+      const err = new Error(
+        'Only Hosts and Co-hosts can delete the uploaded video'
+      );
       err.statusCode = 403;
       throw err;
     }
@@ -1078,7 +1172,7 @@ router.delete('/:id/video', async (req, res, next) => {
       .set({
         videoUrl: null,
         videoState: 'paused',
-        videoTime: 0
+        videoTime: 0,
       })
       .where(eq(rooms.id, roomId));
 
@@ -1088,20 +1182,20 @@ router.delete('/:id/video', async (req, res, next) => {
       io.to(roomId).emit('video-state-change', {
         action: 'pause',
         time: 0,
-        videoUrl: null
+        videoUrl: null,
       });
 
       io.to(roomId).emit('message-received', {
         id: Math.random().toString(),
         username: 'System',
         content: `The active local video was removed by ${req.user.username}.`,
-        createdAt: new Date()
+        createdAt: new Date(),
       });
     }
 
     res.status(200).json({
       status: 'success',
-      message: 'Video files deleted and stream cleared'
+      message: 'Video files deleted and stream cleared',
     });
   } catch (error) {
     next(error);
@@ -1139,11 +1233,15 @@ router.put('/:id/pdf-url', async (req, res, next) => {
     const [member] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .where(
+        and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+      )
       .limit(1);
 
     if (!member || (member.role !== 'host' && member.role !== 'co-host')) {
-      const err = new Error('Only Hosts and Co-hosts can set PDF document links');
+      const err = new Error(
+        'Only Hosts and Co-hosts can set PDF document links'
+      );
       err.statusCode = 403;
       throw err;
     }
@@ -1153,7 +1251,7 @@ router.put('/:id/pdf-url', async (req, res, next) => {
       .update(rooms)
       .set({
         activePdfUrl: pdfUrl.trim(),
-        activePdfPage: 1
+        activePdfPage: 1,
       })
       .where(eq(rooms.id, roomId));
 
@@ -1166,7 +1264,7 @@ router.put('/:id/pdf-url', async (req, res, next) => {
     res.status(200).json({
       status: 'success',
       message: 'PDF URL set successfully',
-      data: { pdfUrl: pdfUrl.trim(), page: 1 }
+      data: { pdfUrl: pdfUrl.trim(), page: 1 },
     });
   } catch (error) {
     next(error);
@@ -1186,11 +1284,15 @@ router.get('/:id/session-notes', async (req, res, next) => {
     const [member] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .where(
+        and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+      )
       .limit(1);
 
     if (!member) {
-      const err = new Error('You must be a member of this room to access session notes');
+      const err = new Error(
+        'You must be a member of this room to access session notes'
+      );
       err.statusCode = 403;
       throw err;
     }
@@ -1203,7 +1305,7 @@ router.get('/:id/session-notes', async (req, res, next) => {
         createdById: sessionNotes.createdById,
         createdAt: sessionNotes.createdAt,
         updatedAt: sessionNotes.updatedAt,
-        username: users.username
+        username: users.username,
       })
       .from(sessionNotes)
       .leftJoin(users, eq(sessionNotes.createdById, users.id))
@@ -1212,7 +1314,7 @@ router.get('/:id/session-notes', async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
-      data: notes
+      data: notes,
     });
   } catch (error) {
     next(error);
@@ -1230,7 +1332,9 @@ router.post('/:id/session-notes', async (req, res, next) => {
     const { title, content } = req.body;
 
     if (!title || !title.trim() || !content || !content.trim()) {
-      const err = new Error('Title and content are required to save session notes');
+      const err = new Error(
+        'Title and content are required to save session notes'
+      );
       err.statusCode = 400;
       throw err;
     }
@@ -1239,11 +1343,15 @@ router.post('/:id/session-notes', async (req, res, next) => {
     const [member] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .where(
+        and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+      )
       .limit(1);
 
     if (!member || member.role === 'guest') {
-      const err = new Error('Guests do not have permission to save session notes');
+      const err = new Error(
+        'Guests do not have permission to save session notes'
+      );
       err.statusCode = 403;
       throw err;
     }
@@ -1254,7 +1362,7 @@ router.post('/:id/session-notes', async (req, res, next) => {
         roomId,
         title: title.trim(),
         content: content.trim(),
-        createdById: userId
+        createdById: userId,
       })
       .returning();
 
@@ -1269,8 +1377,8 @@ router.post('/:id/session-notes', async (req, res, next) => {
       status: 'success',
       data: {
         ...newNote,
-        username: userRecord?.username || 'Unknown'
-      }
+        username: userRecord?.username || 'Unknown',
+      },
     });
   } catch (error) {
     next(error);
@@ -1291,7 +1399,9 @@ router.delete('/:id/session-notes/:noteId', async (req, res, next) => {
     const [member] = await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .where(
+        and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId))
+      )
       .limit(1);
 
     if (!member) {
@@ -1313,19 +1423,23 @@ router.delete('/:id/session-notes/:noteId', async (req, res, next) => {
     }
 
     const userRole = member.role;
-    if (userRole !== 'host' && userRole !== 'co-host' && note.createdById !== userId) {
-      const err = new Error('You do not have permission to delete this session note');
+    if (
+      userRole !== 'host' &&
+      userRole !== 'co-host' &&
+      note.createdById !== userId
+    ) {
+      const err = new Error(
+        'You do not have permission to delete this session note'
+      );
       err.statusCode = 403;
       throw err;
     }
 
-    await db
-      .delete(sessionNotes)
-      .where(eq(sessionNotes.id, noteId));
+    await db.delete(sessionNotes).where(eq(sessionNotes.id, noteId));
 
     res.status(200).json({
       status: 'success',
-      message: 'Session note deleted successfully'
+      message: 'Session note deleted successfully',
     });
   } catch (error) {
     next(error);

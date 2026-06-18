@@ -13,10 +13,14 @@ const router = Router();
 
 // Zod schema rules for editing profile details
 const updateProfileSchema = z.object({
-  username: z.string()
+  username: z
+    .string()
     .min(3, 'Username must be at least 3 characters')
     .max(30)
-    .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain alphanumeric characters and underscores')
+    .regex(
+      /^[a-zA-Z0-9_]+$/,
+      'Username can only contain alphanumeric characters and underscores'
+    )
     .optional(),
   email: z.string().email('Invalid email address format').optional(),
 });
@@ -24,7 +28,9 @@ const updateProfileSchema = z.object({
 // Zod schema rules for password changes
 const changePasswordSchema = z.object({
   oldPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z.string().min(6, 'New password must be at least 6 characters long'),
+  newPassword: z
+    .string()
+    .min(6, 'New password must be at least 6 characters long'),
 });
 
 // Enforce authentication on all profile routes
@@ -67,103 +73,111 @@ router.get('/profile', async (req, res, next) => {
  * 2. Edit Profile Details
  * PUT /api/v1/users/profile
  */
-router.put('/profile', validateBody(updateProfileSchema), async (req, res, next) => {
-  try {
-    const { username, email } = req.body;
-    
-    // Prevent empty requests
-    if (!username && !email) {
-      const err = new Error('No profile parameters provided for update');
-      err.statusCode = 400;
-      throw err;
-    }
+router.put(
+  '/profile',
+  validateBody(updateProfileSchema),
+  async (req, res, next) => {
+    try {
+      const { username, email } = req.body;
 
-    // Verify username conflicts if changing username
-    if (username) {
-      const conflictUsers = await db
-        .select()
-        .from(users)
-        .where(eq(users.username, username))
-        .limit(1);
-
-      if (conflictUsers.length > 0 && conflictUsers[0].id !== req.user.id) {
-        const err = new Error('Username is already taken');
-        err.statusCode = 409;
+      // Prevent empty requests
+      if (!username && !email) {
+        const err = new Error('No profile parameters provided for update');
+        err.statusCode = 400;
         throw err;
       }
+
+      // Verify username conflicts if changing username
+      if (username) {
+        const conflictUsers = await db
+          .select()
+          .from(users)
+          .where(eq(users.username, username))
+          .limit(1);
+
+        if (conflictUsers.length > 0 && conflictUsers[0].id !== req.user.id) {
+          const err = new Error('Username is already taken');
+          err.statusCode = 409;
+          throw err;
+        }
+      }
+
+      // Update the profile fields
+      const [updatedUser] = await db
+        .update(users)
+        .set({
+          ...(username && { username: username.trim() }),
+          ...(email && { email: email.trim() }),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, req.user.id))
+        .returning();
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          id: updatedUser.id,
+          username: updatedUser.username,
+          email: updatedUser.email,
+          avatarUrl: updatedUser.avatarUrl,
+        },
+      });
+    } catch (error) {
+      next(error);
     }
-
-    // Update the profile fields
-    const [updatedUser] = await db
-      .update(users)
-      .set({
-        ...(username && { username: username.trim() }),
-        ...(email && { email: email.trim() }),
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, req.user.id))
-      .returning();
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        id: updatedUser.id,
-        username: updatedUser.username,
-        email: updatedUser.email,
-        avatarUrl: updatedUser.avatarUrl,
-      },
-    });
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 /**
  * 3. Change Password
  * PUT /api/v1/users/profile/password
  */
-router.put('/profile/password', validateBody(changePasswordSchema), async (req, res, next) => {
-  try {
-    const { oldPassword, newPassword } = req.body;
+router.put(
+  '/profile/password',
+  validateBody(changePasswordSchema),
+  async (req, res, next) => {
+    try {
+      const { oldPassword, newPassword } = req.body;
 
-    // Fetch stored credentials
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, req.user.id))
-      .limit(1);
+      // Fetch stored credentials
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, req.user.id))
+        .limit(1);
 
-    if (!user) {
-      const err = new Error('User profile session invalid');
-      err.statusCode = 404;
-      throw err;
+      if (!user) {
+        const err = new Error('User profile session invalid');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      // Verify old password against database bcrypt hash
+      const isMatch = await comparePassword(oldPassword, user.passwordHash);
+      if (!isMatch) {
+        const err = new Error('Current password is incorrect');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      // Generate hash for new password
+      const newPasswordHash = await hashPassword(newPassword);
+
+      // Update hash in database
+      await db
+        .update(users)
+        .set({ passwordHash: newPasswordHash, updatedAt: new Date() })
+        .where(eq(users.id, req.user.id));
+
+      res.status(200).json({
+        status: 'success',
+        message: 'Password changed successfully',
+      });
+    } catch (error) {
+      next(error);
     }
-
-    // Verify old password against database bcrypt hash
-    const isMatch = await comparePassword(oldPassword, user.passwordHash);
-    if (!isMatch) {
-      const err = new Error('Current password is incorrect');
-      err.statusCode = 400;
-      throw err;
-    }
-
-    // Generate hash for new password
-    const newPasswordHash = await hashPassword(newPassword);
-
-    // Update hash in database
-    await db
-      .update(users)
-      .set({ passwordHash: newPasswordHash, updatedAt: new Date() })
-      .where(eq(users.id, req.user.id));
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Password changed successfully',
-    });
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 /**
  * 4. Upload Avatar
@@ -204,17 +218,28 @@ router.post('/profile/avatar', (req, res, next) => {
 
       if (currentUser && currentUser.avatarUrl) {
         // If it was a local path on disk, remove it
-        if (!currentUser.avatarUrl.startsWith('http') && !currentUser.avatarUrl.startsWith('data:')) {
+        if (
+          !currentUser.avatarUrl.startsWith('http') &&
+          !currentUser.avatarUrl.startsWith('data:')
+        ) {
           const oldFilePath = `./public${currentUser.avatarUrl}`;
           fs.unlink(oldFilePath, (err) => {
-            if (err) console.warn(`Could not delete old avatar: ${oldFilePath}`, err.message);
+            if (err)
+              console.warn(
+                `Could not delete old avatar: ${oldFilePath}`,
+                err.message
+              );
           });
         }
       }
 
       // Delete the newly uploaded temp file from disk immediately
       fs.unlink(filePath, (err) => {
-        if (err) console.warn(`Could not delete temp uploaded file: ${filePath}`, err.message);
+        if (err)
+          console.warn(
+            `Could not delete temp uploaded file: ${filePath}`,
+            err.message
+          );
       });
 
       // Update user record in database with the base64 URL
@@ -254,11 +279,17 @@ router.delete('/profile/avatar', async (req, res, next) => {
 
     if (user && user.avatarUrl) {
       // If the avatar is local disk path, remove it
-      if (!user.avatarUrl.startsWith('http') && !user.avatarUrl.startsWith('data:')) {
+      if (
+        !user.avatarUrl.startsWith('http') &&
+        !user.avatarUrl.startsWith('data:')
+      ) {
         const filePath = `./public${user.avatarUrl}`;
         fs.unlink(filePath, (err) => {
           if (err) {
-            console.warn(`Could not delete avatar file from disk: ${filePath}`, err.message);
+            console.warn(
+              `Could not delete avatar file from disk: ${filePath}`,
+              err.message
+            );
           }
         });
       }

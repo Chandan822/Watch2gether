@@ -7,10 +7,10 @@ import { videoProcessingStatus } from './socketService.js';
 /**
  * Converts a video file into HLS segments (.m3u8 index and .ts chunks)
  * using the static ffmpeg binary.
- * 
+ *
  * First tries stream copy (instantaneous, keeps original video/audio tracks).
  * If that fails, it falls back to full encoding (libx264/aac).
- * 
+ *
  * @param {string} inputPath - Absolute path to input video file
  * @param {string} outputDir - Absolute path to HLS output directory
  * @param {object} io - Socket.io instance for progress notifications
@@ -18,7 +18,14 @@ import { videoProcessingStatus } from './socketService.js';
  * @param {function} onComplete - Callback when conversion completes, takes the virtual URL path
  * @param {function} onError - Callback when conversion fails
  */
-export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onError }) {
+export function convertToHls({
+  inputPath,
+  outputDir,
+  io,
+  roomId,
+  onComplete,
+  onError,
+}) {
   // Ensure output directory exists
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
@@ -29,9 +36,15 @@ export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onE
   const segmentFilename = path.join(outputDir, 'seg_%03d.ts');
 
   // Broadcast starting phase
-  videoProcessingStatus.set(roomId, { status: 'started', message: 'Analyzing uploaded video file...' });
+  videoProcessingStatus.set(roomId, {
+    status: 'started',
+    message: 'Analyzing uploaded video file...',
+  });
   if (io) {
-    io.to(roomId).emit('video-processing', { status: 'started', message: 'Analyzing uploaded video file...' });
+    io.to(roomId).emit('video-processing', {
+      status: 'started',
+      message: 'Analyzing uploaded video file...',
+    });
   }
 
   console.log(`🎬 Starting HLS conversion (Stream Copy) for: ${inputPath}`);
@@ -39,18 +52,30 @@ export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onE
   // FFmpeg arguments for stream copy
   const streamCopyArgs = [
     '-y', // Overwrite files
-    '-i', inputPath,
-    '-codec', 'copy',
-    '-start_number', '0',
-    '-hls_time', '10',
-    '-hls_list_size', '0',
-    '-hls_segment_filename', segmentFilename,
-    indexPlaylistPath
+    '-i',
+    inputPath,
+    '-codec',
+    'copy',
+    '-start_number',
+    '0',
+    '-hls_time',
+    '10',
+    '-hls_list_size',
+    '0',
+    '-hls_segment_filename',
+    segmentFilename,
+    indexPlaylistPath,
   ];
 
-  videoProcessingStatus.set(roomId, { status: 'segmenting', message: 'Extracting video tracks into HLS buckets (Fast Stream Copy)...' });
+  videoProcessingStatus.set(roomId, {
+    status: 'segmenting',
+    message: 'Extracting video tracks into HLS buckets (Fast Stream Copy)...',
+  });
   if (io) {
-    io.to(roomId).emit('video-processing', { status: 'segmenting', message: 'Extracting video tracks into HLS buckets (Fast Stream Copy)...' });
+    io.to(roomId).emit('video-processing', {
+      status: 'segmenting',
+      message: 'Extracting video tracks into HLS buckets (Fast Stream Copy)...',
+    });
   }
 
   const copyProcess = spawn(ffmpegPath, streamCopyArgs);
@@ -63,7 +88,7 @@ export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onE
   copyProcess.on('close', (code) => {
     if (code === 0) {
       console.log(`✅ HLS conversion completed successfully via stream copy.`);
-      
+
       // Delete temporary input video file
       try {
         fs.unlinkSync(inputPath);
@@ -72,34 +97,57 @@ export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onE
       }
 
       const relativeUrl = `/uploads/${path.relative('public/uploads', indexPlaylistPath).replace(/\\/g, '/')}`;
-      
+
       videoProcessingStatus.delete(roomId);
       if (io) {
-        io.to(roomId).emit('video-processing', { status: 'completed', videoUrl: relativeUrl });
+        io.to(roomId).emit('video-processing', {
+          status: 'completed',
+          videoUrl: relativeUrl,
+        });
       }
       onComplete(relativeUrl);
     } else {
-      console.warn(`⚠️ Stream copy failed with code ${code}. Stderr: ${copyStderr}. Falling back to full HLS transcoding...`);
-      
-      videoProcessingStatus.set(roomId, { status: 'segmenting', message: 'Stream copy failed. Transcoding video chunks (this might take a moment)...' });
+      console.warn(
+        `⚠️ Stream copy failed with code ${code}. Stderr: ${copyStderr}. Falling back to full HLS transcoding...`
+      );
+
+      videoProcessingStatus.set(roomId, {
+        status: 'segmenting',
+        message:
+          'Stream copy failed. Transcoding video chunks (this might take a moment)...',
+      });
       if (io) {
-        io.to(roomId).emit('video-processing', { status: 'segmenting', message: 'Stream copy failed. Transcoding video chunks (this might take a moment)...' });
+        io.to(roomId).emit('video-processing', {
+          status: 'segmenting',
+          message:
+            'Stream copy failed. Transcoding video chunks (this might take a moment)...',
+        });
       }
 
       // FFmpeg arguments for full transcoding
       const transcodeArgs = [
         '-y',
-        '-i', inputPath,
-        '-codec:v', 'libx264',
-        '-codec:a', 'aac',
-        '-pix_fmt', 'yuv420p',
-        '-preset', 'veryfast',
-        '-g', '60',
-        '-sc_threshold', '0',
-        '-hls_time', '10',
-        '-hls_list_size', '0',
-        '-hls_segment_filename', segmentFilename,
-        indexPlaylistPath
+        '-i',
+        inputPath,
+        '-codec:v',
+        'libx264',
+        '-codec:a',
+        'aac',
+        '-pix_fmt',
+        'yuv420p',
+        '-preset',
+        'veryfast',
+        '-g',
+        '60',
+        '-sc_threshold',
+        '0',
+        '-hls_time',
+        '10',
+        '-hls_list_size',
+        '0',
+        '-hls_segment_filename',
+        segmentFilename,
+        indexPlaylistPath,
       ];
 
       const transcodeProcess = spawn(ffmpegPath, transcodeArgs);
@@ -118,18 +166,30 @@ export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onE
         }
 
         if (transcodeCode === 0) {
-          console.log(`✅ HLS conversion completed successfully via full transcoding.`);
+          console.log(
+            `✅ HLS conversion completed successfully via full transcoding.`
+          );
           const relativeUrl = `/uploads/${path.relative('public/uploads', indexPlaylistPath).replace(/\\/g, '/')}`;
-          
+
           videoProcessingStatus.delete(roomId);
           if (io) {
-            io.to(roomId).emit('video-processing', { status: 'completed', videoUrl: relativeUrl });
+            io.to(roomId).emit('video-processing', {
+              status: 'completed',
+              videoUrl: relativeUrl,
+            });
           }
           onComplete(relativeUrl);
         } else {
-          console.error(`❌ HLS transcoding failed with code ${transcodeCode}. Stderr:`, transcodeStderr);
-          
-          videoProcessingStatus.set(roomId, { status: 'failed', message: 'Failed to convert video file. The format is not supported.' });
+          console.error(
+            `❌ HLS transcoding failed with code ${transcodeCode}. Stderr:`,
+            transcodeStderr
+          );
+
+          videoProcessingStatus.set(roomId, {
+            status: 'failed',
+            message:
+              'Failed to convert video file. The format is not supported.',
+          });
           setTimeout(() => {
             if (videoProcessingStatus.get(roomId)?.status === 'failed') {
               videoProcessingStatus.delete(roomId);
@@ -137,9 +197,15 @@ export function convertToHls({ inputPath, outputDir, io, roomId, onComplete, onE
           }, 10000);
 
           if (io) {
-            io.to(roomId).emit('video-processing', { status: 'failed', message: 'Failed to convert video file. The format is not supported.' });
+            io.to(roomId).emit('video-processing', {
+              status: 'failed',
+              message:
+                'Failed to convert video file. The format is not supported.',
+            });
           }
-          onError(new Error(`Transcoding failed with exit code ${transcodeCode}`));
+          onError(
+            new Error(`Transcoding failed with exit code ${transcodeCode}`)
+          );
         }
       });
     }

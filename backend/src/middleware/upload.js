@@ -4,7 +4,7 @@ import fs from 'fs';
 
 /**
  * Multer File Upload Middleware
- * 
+ *
  * Configures file stream handling for avatar image uploads:
  * 1. Storage destination: writes directly to './public/uploads/'.
  * 2. Filename formatting: prefix naming utilizing active user ID and timestamp.
@@ -27,19 +27,27 @@ const storage = multer.diskStorage({
     // Read user details from requireAuth context
     const userId = req.user ? req.user.id : 'unauth';
     const extension = path.extname(file.originalname).toLowerCase();
-    
+
     cb(null, `avatar-${userId}-${Date.now()}${extension}`);
   },
 });
 
 // Enforce image-only MIME formats
 const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+  ];
+
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Format error: Only JPEG, PNG, and WEBP images are supported'), false);
+    cb(
+      new Error('Format error: Only JPEG, PNG, and WEBP images are supported'),
+      false
+    );
   }
 };
 
@@ -101,15 +109,31 @@ const videoFileFilter = (req, file, cb) => {
     'video/quicktime',
     'video/x-matroska',
     'video/mpeg',
-    'video/3gpp'
+    'video/3gpp',
   ];
   const fileExt = path.extname(file.originalname).toLowerCase();
-  const allowedExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.mkv', '.avi', '.3gp'];
+  const allowedExtensions = [
+    '.mp4',
+    '.webm',
+    '.ogg',
+    '.mov',
+    '.mkv',
+    '.avi',
+    '.3gp',
+  ];
 
-  if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(fileExt)) {
+  if (
+    allowedMimeTypes.includes(file.mimetype) ||
+    allowedExtensions.includes(fileExt)
+  ) {
     cb(null, true);
   } else {
-    cb(new Error('Format error: Only video files (MP4, WEBM, OGG, MOV, MKV, AVI, 3GP) are supported'), false);
+    cb(
+      new Error(
+        'Format error: Only video files (MP4, WEBM, OGG, MOV, MKV, AVI, 3GP) are supported'
+      ),
+      false
+    );
   }
 };
 

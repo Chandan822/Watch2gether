@@ -1,19 +1,36 @@
 import { db } from '../db/index.js';
-import { users, rooms, messages, roomMembers, messageReactions, videoQueue, polls, pollOptions, pollVotes, notifications } from '../db/schema.js';
+import {
+  users,
+  rooms,
+  messages,
+  roomMembers,
+  messageReactions,
+  videoQueue,
+  polls,
+  pollOptions,
+  pollVotes,
+  notifications,
+} from '../db/schema.js';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 
 /**
  * Socket.IO Real-Time Service Handler
- * 
+ *
  * Configures the Socket.IO connection event loop. Listens to actions sent
  * from clients, updates PostgreSQL database records using Drizzle ORM, and
  * broadcasts changes to all other connected sockets within the room.
- * 
+ *
  * Redesigned to support the normalized users, messages, and roomMembers tables.
  */
 let ioInstance = null;
 
-export const createNotification = async ({ userId, type, title, content, referenceId }) => {
+export const createNotification = async ({
+  userId,
+  type,
+  title,
+  content,
+  referenceId,
+}) => {
   try {
     const [newNotif] = await db
       .insert(notifications)
@@ -157,7 +174,7 @@ export const initSocketService = (io) => {
         onlineUsers.set(userId, new Set());
       }
       onlineUsers.get(userId).add(socket.id);
-      
+
       // Emit status changed to online
       io.emit('user-status-changed', { userId, status: 'online' });
       console.log(`🟢 User registered online: ${userId}`);
@@ -200,7 +217,12 @@ export const initSocketService = (io) => {
         let [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, roomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         if (!memberRecord) {
@@ -219,7 +241,9 @@ export const initSocketService = (io) => {
         // Check if user has other tabs/connections in this room
         const userSockets = onlineUsers.get(currentUserId) || new Set();
         const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
-        const otherSocketsInRoom = [...userSockets].filter(sid => sid !== socket.id && socketsInRoom && socketsInRoom.has(sid));
+        const otherSocketsInRoom = [...userSockets].filter(
+          (sid) => sid !== socket.id && socketsInRoom && socketsInRoom.has(sid)
+        );
         const isAlreadyInRoom = otherSocketsInRoom.length > 0;
 
         // Fetch active users in room by joining roomMembers and users tables
@@ -260,7 +284,8 @@ export const initSocketService = (io) => {
         if (roomRecord) {
           let estimatedTime = roomRecord.videoTime;
           if (roomRecord.videoState === 'play') {
-            const elapsed = (Date.now() - new Date(roomRecord.updatedAt).getTime()) / 1000;
+            const elapsed =
+              (Date.now() - new Date(roomRecord.updatedAt).getTime()) / 1000;
             estimatedTime += elapsed;
           }
           socket.emit('video-state-change', {
@@ -283,7 +308,9 @@ export const initSocketService = (io) => {
           })
           .from(videoQueue)
           .leftJoin(users, eq(videoQueue.addedById, users.id))
-          .where(and(eq(videoQueue.roomId, roomId), eq(videoQueue.isPlayed, false)))
+          .where(
+            and(eq(videoQueue.roomId, roomId), eq(videoQueue.isPlayed, false))
+          )
           .orderBy(videoQueue.sortOrder);
 
         socket.emit('queue-update', queue);
@@ -299,7 +326,12 @@ export const initSocketService = (io) => {
         // Send initial AI assistant session state
         if (roomRecord && roomRecord.isAiEnabled) {
           if (!aiSessions.has(roomId)) {
-            aiSessions.set(roomId, { summary: null, questions: null, quiz: null, explanations: [] });
+            aiSessions.set(roomId, {
+              summary: null,
+              questions: null,
+              quiz: null,
+              explanations: [],
+            });
           }
           socket.emit('ai-init', aiSessions.get(roomId));
         }
@@ -314,7 +346,7 @@ export const initSocketService = (io) => {
           socket.emit('study-init', {
             sharedNotes: roomRecord.sharedNotes || '',
             activePdfUrl: roomRecord.activePdfUrl || null,
-            activePdfPage: roomRecord.activePdfPage || 1
+            activePdfPage: roomRecord.activePdfPage || 1,
           });
         }
       } catch (error) {
@@ -331,14 +363,21 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const userRole = memberRecord?.role || 'member';
 
         // Restrict video player modifications to Hosts and Co-hosts
         if (userRole !== 'host' && userRole !== 'co-host') {
-          console.log(`🚫 Sync blocked: User "${currentUsername}" (role: "${userRole}") attempted to change video state.`);
+          console.log(
+            `🚫 Sync blocked: User "${currentUsername}" (role: "${userRole}") attempted to change video state.`
+          );
           return;
         }
 
@@ -376,14 +415,21 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const userRole = memberRecord?.role || 'member';
 
         // Guests cannot send chat messages
         if (userRole === 'guest') {
-          console.log(`🚫 Chat blocked: User "${currentUsername}" (role: "guest") attempted to send a message.`);
+          console.log(
+            `🚫 Chat blocked: User "${currentUsername}" (role: "guest") attempted to send a message.`
+          );
           return;
         }
 
@@ -435,7 +481,12 @@ export const initSocketService = (io) => {
             const [roomMemberCheck] = await db
               .select()
               .from(roomMembers)
-              .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, mentionedUser.id)))
+              .where(
+                and(
+                  eq(roomMembers.roomId, currentRoomId),
+                  eq(roomMembers.userId, mentionedUser.id)
+                )
+              )
               .limit(1);
 
             if (roomMemberCheck) {
@@ -488,13 +539,11 @@ export const initSocketService = (io) => {
             .where(eq(messageReactions.id, existing.id));
           action = 'removed';
         } else {
-          await db
-            .insert(messageReactions)
-            .values({
-              messageId,
-              userId: currentUserId,
-              emoji,
-            });
+          await db.insert(messageReactions).values({
+            messageId,
+            userId: currentUserId,
+            emoji,
+          });
         }
 
         io.to(currentRoomId).emit('reaction-updated', {
@@ -518,12 +567,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 Message deletion blocked: User "${currentUsername}" (role: "${role}") attempted to delete a message.`);
+          console.log(
+            `🚫 Message deletion blocked: User "${currentUsername}" (role: "${role}") attempted to delete a message.`
+          );
           return;
         }
 
@@ -531,22 +587,26 @@ export const initSocketService = (io) => {
         const [messageRecord] = await db
           .select()
           .from(messages)
-          .where(and(eq(messages.id, messageId), eq(messages.roomId, currentRoomId)))
+          .where(
+            and(eq(messages.id, messageId), eq(messages.roomId, currentRoomId))
+          )
           .limit(1);
 
         if (!messageRecord) {
-          console.log(`🚫 Message deletion blocked: Message "${messageId}" does not exist in room "${currentRoomId}".`);
+          console.log(
+            `🚫 Message deletion blocked: Message "${messageId}" does not exist in room "${currentRoomId}".`
+          );
           return;
         }
 
         // Delete the message from the db
-        await db
-          .delete(messages)
-          .where(eq(messages.id, messageId));
+        await db.delete(messages).where(eq(messages.id, messageId));
 
         // Broadcast to all clients in the room
         io.to(currentRoomId).emit('message-deleted', { messageId });
-        console.log(`💬 [Room Chat] ${currentRoomId} - Message "${messageId}" deleted by "${currentUsername}"`);
+        console.log(
+          `💬 [Room Chat] ${currentRoomId} - Message "${messageId}" deleted by "${currentUsername}"`
+        );
       } catch (error) {
         console.error('❌ Socket delete-message error:', error);
       }
@@ -561,12 +621,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 Add to queue blocked: User "${currentUsername}" (role: "${role}") is not host/co-host.`);
+          console.log(
+            `🚫 Add to queue blocked: User "${currentUsername}" (role: "${role}") is not host/co-host.`
+          );
           return;
         }
 
@@ -575,16 +642,20 @@ export const initSocketService = (io) => {
           .select()
           .from(videoQueue)
           .where(eq(videoQueue.roomId, currentRoomId));
-        
-        const maxSortOrder = roomQueue.length > 0 
-          ? Math.max(...roomQueue.map(item => item.sortOrder)) 
-          : 0;
+
+        const maxSortOrder =
+          roomQueue.length > 0
+            ? Math.max(...roomQueue.map((item) => item.sortOrder))
+            : 0;
 
         // Resolve a basic title from the URL
         let title = 'Synced Video';
         try {
           const urlObj = new URL(videoUrl);
-          if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+          if (
+            urlObj.hostname.includes('youtube.com') ||
+            urlObj.hostname.includes('youtu.be')
+          ) {
             title = 'YouTube Video';
             const vParam = urlObj.searchParams.get('v');
             if (vParam) {
@@ -592,7 +663,9 @@ export const initSocketService = (io) => {
             }
           } else {
             const pathname = urlObj.pathname;
-            const lastSegment = pathname.substring(pathname.lastIndexOf('/') + 1);
+            const lastSegment = pathname.substring(
+              pathname.lastIndexOf('/') + 1
+            );
             if (lastSegment) {
               title = decodeURIComponent(lastSegment);
             }
@@ -601,16 +674,14 @@ export const initSocketService = (io) => {
           title = 'External Video';
         }
 
-        await db
-          .insert(videoQueue)
-          .values({
-            roomId: currentRoomId,
-            addedById: currentUserId,
-            videoUrl: videoUrl.trim(),
-            title,
-            sortOrder: maxSortOrder + 1,
-            isPlayed: false,
-          });
+        await db.insert(videoQueue).values({
+          roomId: currentRoomId,
+          addedById: currentUserId,
+          videoUrl: videoUrl.trim(),
+          title,
+          sortOrder: maxSortOrder + 1,
+          isPlayed: false,
+        });
 
         // Fetch updated queue and broadcast to all room members
         const updatedQueue = await db
@@ -625,7 +696,12 @@ export const initSocketService = (io) => {
           })
           .from(videoQueue)
           .leftJoin(users, eq(videoQueue.addedById, users.id))
-          .where(and(eq(videoQueue.roomId, currentRoomId), eq(videoQueue.isPlayed, false)))
+          .where(
+            and(
+              eq(videoQueue.roomId, currentRoomId),
+              eq(videoQueue.isPlayed, false)
+            )
+          )
           .orderBy(videoQueue.sortOrder);
 
         io.to(currentRoomId).emit('queue-update', updatedQueue);
@@ -650,18 +726,30 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 Remove from queue blocked: User "${currentUsername}" (role: "${role}") is not host/co-host.`);
+          console.log(
+            `🚫 Remove from queue blocked: User "${currentUsername}" (role: "${role}") is not host/co-host.`
+          );
           return;
         }
 
         await db
           .delete(videoQueue)
-          .where(and(eq(videoQueue.id, queueItemId), eq(videoQueue.roomId, currentRoomId)));
+          .where(
+            and(
+              eq(videoQueue.id, queueItemId),
+              eq(videoQueue.roomId, currentRoomId)
+            )
+          );
 
         // Fetch updated queue and broadcast
         const updatedQueue = await db
@@ -676,7 +764,12 @@ export const initSocketService = (io) => {
           })
           .from(videoQueue)
           .leftJoin(users, eq(videoQueue.addedById, users.id))
-          .where(and(eq(videoQueue.roomId, currentRoomId), eq(videoQueue.isPlayed, false)))
+          .where(
+            and(
+              eq(videoQueue.roomId, currentRoomId),
+              eq(videoQueue.isPlayed, false)
+            )
+          )
           .orderBy(videoQueue.sortOrder);
 
         io.to(currentRoomId).emit('queue-update', updatedQueue);
@@ -693,12 +786,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const userRole = memberRecord?.role || 'member';
         if (userRole !== 'host' && userRole !== 'co-host') {
-          console.log(`🚫 Skip blocked: User "${currentUsername}" (role: "${userRole}") attempted to skip.`);
+          console.log(
+            `🚫 Skip blocked: User "${currentUsername}" (role: "${userRole}") attempted to skip.`
+          );
           return;
         }
 
@@ -706,7 +806,12 @@ export const initSocketService = (io) => {
         const [nextItem] = await db
           .select()
           .from(videoQueue)
-          .where(and(eq(videoQueue.roomId, currentRoomId), eq(videoQueue.isPlayed, false)))
+          .where(
+            and(
+              eq(videoQueue.roomId, currentRoomId),
+              eq(videoQueue.isPlayed, false)
+            )
+          )
           .orderBy(videoQueue.sortOrder)
           .limit(1);
 
@@ -747,7 +852,12 @@ export const initSocketService = (io) => {
             })
             .from(videoQueue)
             .leftJoin(users, eq(videoQueue.addedById, users.id))
-            .where(and(eq(videoQueue.roomId, currentRoomId), eq(videoQueue.isPlayed, false)))
+            .where(
+              and(
+                eq(videoQueue.roomId, currentRoomId),
+                eq(videoQueue.isPlayed, false)
+              )
+            )
             .orderBy(videoQueue.sortOrder);
 
           io.to(currentRoomId).emit('queue-update', updatedQueue);
@@ -774,11 +884,18 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         if (!memberRecord || memberRecord.role === 'guest') {
-          console.log(`🚫 Notes blocked: User "${currentUsername}" (role: "${memberRecord?.role}") is guest.`);
+          console.log(
+            `🚫 Notes blocked: User "${currentUsername}" (role: "${memberRecord?.role}") is guest.`
+          );
           return;
         }
 
@@ -804,12 +921,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 PDF page sync blocked: User "${currentUsername}" is not host/co-host.`);
+          console.log(
+            `🚫 PDF page sync blocked: User "${currentUsername}" is not host/co-host.`
+          );
           return;
         }
 
@@ -835,12 +959,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 PDF URL change blocked: User "${currentUsername}" is not host/co-host.`);
+          console.log(
+            `🚫 PDF URL change blocked: User "${currentUsername}" is not host/co-host.`
+          );
           return;
         }
 
@@ -872,9 +1003,13 @@ export const initSocketService = (io) => {
     socket.on('leave-room', async () => {
       if (currentMemberId && currentRoomId) {
         try {
-          console.log(`👤 User "${currentUsername}" explicitly leaving room ${currentRoomId}`);
-          
-          await db.delete(roomMembers).where(eq(roomMembers.id, currentMemberId));
+          console.log(
+            `👤 User "${currentUsername}" explicitly leaving room ${currentRoomId}`
+          );
+
+          await db
+            .delete(roomMembers)
+            .where(eq(roomMembers.id, currentMemberId));
 
           const activeMembers = await db
             .select({
@@ -891,7 +1026,10 @@ export const initSocketService = (io) => {
             isOnline: isUserOnlineInRoom(member.id, currentRoomId),
           }));
 
-          io.to(currentRoomId).emit('room-users-update', activeMembersWithStatus);
+          io.to(currentRoomId).emit(
+            'room-users-update',
+            activeMembersWithStatus
+          );
 
           io.to(currentRoomId).emit('message-received', {
             id: Math.random().toString(),
@@ -906,7 +1044,9 @@ export const initSocketService = (io) => {
           if (!remainingSockets || remainingSockets.size === 0) {
             whiteboardSessions.delete(currentRoomId);
             aiSessions.delete(currentRoomId);
-            console.log(`🧹 In-memory whiteboard and AI sessions cleared for room ${currentRoomId} (all left via leave-room).`);
+            console.log(
+              `🧹 In-memory whiteboard and AI sessions cleared for room ${currentRoomId} (all left via leave-room).`
+            );
           }
         } catch (error) {
           console.error('❌ Socket leave-room error:', error);
@@ -921,8 +1061,15 @@ export const initSocketService = (io) => {
     socket.on('create-poll', async ({ question, type, options }) => {
       try {
         if (!currentRoomId || !currentUserId) return;
-        if (!question || !options || !Array.isArray(options) || options.length < 2) {
-          console.log('🚫 Create poll failed: Question or options missing or invalid.');
+        if (
+          !question ||
+          !options ||
+          !Array.isArray(options) ||
+          options.length < 2
+        ) {
+          console.log(
+            '🚫 Create poll failed: Question or options missing or invalid.'
+          );
           return;
         }
 
@@ -930,12 +1077,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 Create poll blocked: User "${currentUsername}" is not host/co-host.`);
+          console.log(
+            `🚫 Create poll blocked: User "${currentUsername}" is not host/co-host.`
+          );
           return;
         }
 
@@ -962,7 +1116,9 @@ export const initSocketService = (io) => {
         // Fetch updated polls and broadcast
         const updatedPolls = await getRoomPolls(currentRoomId);
         io.to(currentRoomId).emit('polls-update', updatedPolls);
-        console.log(`🗳️ [Room Polls] ${currentRoomId} - Poll created by "${currentUsername}": "${question}"`);
+        console.log(
+          `🗳️ [Room Polls] ${currentRoomId} - Poll created by "${currentUsername}": "${question}"`
+        );
       } catch (error) {
         console.error('❌ Socket create-poll error:', error);
       }
@@ -988,7 +1144,9 @@ export const initSocketService = (io) => {
         const [optionRecord] = await db
           .select()
           .from(pollOptions)
-          .where(and(eq(pollOptions.id, optionId), eq(pollOptions.pollId, pollId)))
+          .where(
+            and(eq(pollOptions.id, optionId), eq(pollOptions.pollId, pollId))
+          )
           .limit(1);
 
         if (!optionRecord) {
@@ -1000,34 +1158,41 @@ export const initSocketService = (io) => {
         const [existingVote] = await db
           .select()
           .from(pollVotes)
-          .where(and(eq(pollVotes.pollId, pollId), eq(pollVotes.userId, currentUserId)))
+          .where(
+            and(
+              eq(pollVotes.pollId, pollId),
+              eq(pollVotes.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         if (existingVote) {
           if (existingVote.optionId === optionId) {
             // Clicked same option -> retract vote
-            await db
-              .delete(pollVotes)
-              .where(eq(pollVotes.id, existingVote.id));
-            console.log(`🗳️ [Room Polls] ${currentRoomId} - User "${currentUsername}" retracted vote.`);
+            await db.delete(pollVotes).where(eq(pollVotes.id, existingVote.id));
+            console.log(
+              `🗳️ [Room Polls] ${currentRoomId} - User "${currentUsername}" retracted vote.`
+            );
           } else {
             // Clicked different option -> update vote
             await db
               .update(pollVotes)
               .set({ optionId })
               .where(eq(pollVotes.id, existingVote.id));
-            console.log(`🗳️ [Room Polls] ${currentRoomId} - User "${currentUsername}" changed vote to "${optionRecord.optionText}".`);
+            console.log(
+              `🗳️ [Room Polls] ${currentRoomId} - User "${currentUsername}" changed vote to "${optionRecord.optionText}".`
+            );
           }
         } else {
           // No prior vote -> insert new vote
-          await db
-            .insert(pollVotes)
-            .values({
-              pollId,
-              optionId,
-              userId: currentUserId,
-            });
-          console.log(`🗳️ [Room Polls] ${currentRoomId} - User "${currentUsername}" voted for "${optionRecord.optionText}".`);
+          await db.insert(pollVotes).values({
+            pollId,
+            optionId,
+            userId: currentUserId,
+          });
+          console.log(
+            `🗳️ [Room Polls] ${currentRoomId} - User "${currentUsername}" voted for "${optionRecord.optionText}".`
+          );
         }
 
         // Fetch updated polls and broadcast
@@ -1046,12 +1211,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 Close poll blocked: User "${currentUsername}" is not host/co-host.`);
+          console.log(
+            `🚫 Close poll blocked: User "${currentUsername}" is not host/co-host.`
+          );
           return;
         }
 
@@ -1062,7 +1234,9 @@ export const initSocketService = (io) => {
 
         const updatedPolls = await getRoomPolls(currentRoomId);
         io.to(currentRoomId).emit('polls-update', updatedPolls);
-        console.log(`🗳️ [Room Polls] ${currentRoomId} - Poll "${pollId}" closed by "${currentUsername}"`);
+        console.log(
+          `🗳️ [Room Polls] ${currentRoomId} - Poll "${pollId}" closed by "${currentUsername}"`
+        );
       } catch (error) {
         console.error('❌ Socket close-poll error:', error);
       }
@@ -1076,12 +1250,19 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role !== 'host' && role !== 'co-host') {
-          console.log(`🚫 Delete poll blocked: User "${currentUsername}" is not host/co-host.`);
+          console.log(
+            `🚫 Delete poll blocked: User "${currentUsername}" is not host/co-host.`
+          );
           return;
         }
 
@@ -1091,7 +1272,9 @@ export const initSocketService = (io) => {
 
         const updatedPolls = await getRoomPolls(currentRoomId);
         io.to(currentRoomId).emit('polls-update', updatedPolls);
-        console.log(`🗳️ [Room Polls] ${currentRoomId} - Poll "${pollId}" deleted by "${currentUsername}"`);
+        console.log(
+          `🗳️ [Room Polls] ${currentRoomId} - Poll "${pollId}" deleted by "${currentUsername}"`
+        );
       } catch (error) {
         console.error('❌ Socket delete-poll error:', error);
       }
@@ -1122,18 +1305,27 @@ export const initSocketService = (io) => {
         const [memberRecord] = await db
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, currentRoomId), eq(roomMembers.userId, currentUserId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
           .limit(1);
 
         const role = memberRecord?.role || 'member';
         if (role === 'guest') {
-          console.log(`🚫 Whiteboard clear blocked: User "${currentUsername}" is guest.`);
+          console.log(
+            `🚫 Whiteboard clear blocked: User "${currentUsername}" is guest.`
+          );
           return;
         }
 
         whiteboardSessions.set(currentRoomId, []);
         io.to(currentRoomId).emit('whiteboard-clear');
-        console.log(`🎨 [Whiteboard] Room "${currentRoomId}" canvas cleared by "${currentUsername}"`);
+        console.log(
+          `🎨 [Whiteboard] Room "${currentRoomId}" canvas cleared by "${currentUsername}"`
+        );
       } catch (error) {
         console.error('❌ Socket whiteboard-clear error:', error);
       }
@@ -1168,7 +1360,10 @@ export const initSocketService = (io) => {
       });
 
       // Register newcomer
-      roomVoice.set(socket.id, { userId: currentUserId, username: currentUsername });
+      roomVoice.set(socket.id, {
+        userId: currentUserId,
+        username: currentUsername,
+      });
 
       // Broadcast updated participant list to the whole room (not just voice)
       const participants = [...roomVoice.entries()].map(([sid, info]) => ({
@@ -1178,7 +1373,9 @@ export const initSocketService = (io) => {
       }));
       io.to(currentRoomId).emit('voice-participants-update', participants);
 
-      console.log(`🎤 [Voice] ${currentUsername} joined voice in room ${currentRoomId} (${roomVoice.size} total)`);
+      console.log(
+        `🎤 [Voice] ${currentUsername} joined voice in room ${currentRoomId} (${roomVoice.size} total)`
+      );
     });
 
     /**
@@ -1193,7 +1390,10 @@ export const initSocketService = (io) => {
 
       // Notify remaining voice participants to tear down their peer connection
       roomVoice.forEach((_, peerSocketId) => {
-        io.to(peerSocketId).emit('voice-user-left', { userId: currentUserId, socketId: socket.id });
+        io.to(peerSocketId).emit('voice-user-left', {
+          userId: currentUserId,
+          socketId: socket.id,
+        });
       });
 
       // Broadcast updated participant list
@@ -1205,7 +1405,9 @@ export const initSocketService = (io) => {
       io.to(currentRoomId).emit('voice-participants-update', participants);
 
       if (roomVoice.size === 0) voiceChannels.delete(currentRoomId);
-      console.log(`🔇 [Voice] ${currentUsername} left voice in room ${currentRoomId}`);
+      console.log(
+        `🔇 [Voice] ${currentUsername} left voice in room ${currentRoomId}`
+      );
     });
 
     /**
@@ -1259,7 +1461,10 @@ export const initSocketService = (io) => {
         if (roomVoice && roomVoice.has(socket.id)) {
           roomVoice.delete(socket.id);
           roomVoice.forEach((_, peerSocketId) => {
-            io.to(peerSocketId).emit('voice-user-left', { userId: currentUserId, socketId: socket.id });
+            io.to(peerSocketId).emit('voice-user-left', {
+              userId: currentUserId,
+              socketId: socket.id,
+            });
           });
           const participants = [...roomVoice.entries()].map(([sid, info]) => ({
             socketId: sid,
@@ -1274,7 +1479,10 @@ export const initSocketService = (io) => {
       if (currentRoomId && currentUserId) {
         try {
           // Do NOT delete the roomMembers record!
-          const isStillOnlineInRoom = isUserOnlineInRoom(currentUserId, currentRoomId);
+          const isStillOnlineInRoom = isUserOnlineInRoom(
+            currentUserId,
+            currentRoomId
+          );
 
           // Fetch updated room users and emit
           const activeMembers = await db
@@ -1292,7 +1500,10 @@ export const initSocketService = (io) => {
             isOnline: isUserOnlineInRoom(member.id, currentRoomId),
           }));
 
-          io.to(currentRoomId).emit('room-users-update', activeMembersWithStatus);
+          io.to(currentRoomId).emit(
+            'room-users-update',
+            activeMembersWithStatus
+          );
 
           if (!isStillOnlineInRoom) {
             // Broadcast user went offline
@@ -1309,7 +1520,9 @@ export const initSocketService = (io) => {
           if (!remainingSockets || remainingSockets.size === 0) {
             whiteboardSessions.delete(currentRoomId);
             aiSessions.delete(currentRoomId);
-            console.log(`🧹 In-memory whiteboard and AI sessions cleared for room ${currentRoomId} (all left via disconnect).`);
+            console.log(
+              `🧹 In-memory whiteboard and AI sessions cleared for room ${currentRoomId} (all left via disconnect).`
+            );
           }
         } catch (error) {
           console.error('❌ Socket disconnect cleanup error:', error);

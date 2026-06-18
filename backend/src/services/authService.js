@@ -4,7 +4,7 @@ import { config } from '../config/index.js';
 
 /**
  * Authentication Service
- * 
+ *
  * Houses operations for:
  * 1. Password cryptography (hashing and verification via bcrypt)
  * 2. Token creation and validation (JWT Access and Refresh tokens)
@@ -34,7 +34,12 @@ export const comparePassword = async (password, hash) => {
  */
 export const generateAccessToken = (user) => {
   return jwt.sign(
-    { id: user.id, username: user.username, email: user.email, avatarUrl: user.avatarUrl },
+    {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+    },
     config.JWT_ACCESS_SECRET,
     { expiresIn: '15m' }
   );
@@ -45,11 +50,9 @@ export const generateAccessToken = (user) => {
  * Contains only the user ID to check session validity.
  */
 export const generateRefreshToken = (user) => {
-  return jwt.sign(
-    { id: user.id },
-    config.JWT_REFRESH_SECRET,
-    { expiresIn: '7d' }
-  );
+  return jwt.sign({ id: user.id }, config.JWT_REFRESH_SECRET, {
+    expiresIn: '7d',
+  });
 };
 
 /**

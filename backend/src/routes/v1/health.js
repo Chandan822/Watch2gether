@@ -5,7 +5,7 @@ const router = Router();
 /**
  * Health Check Endpoint
  * GET /api/v1/health
- * Used by cloud load balancers, ping checkers, and client apps to check 
+ * Used by cloud load balancers, ping checkers, and client apps to check
  * whether the backend is up and running.
  */
 router.get('/', (req, res) => {
