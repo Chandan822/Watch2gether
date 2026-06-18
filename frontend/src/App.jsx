@@ -144,8 +144,8 @@ function Navbar() {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-200 dark:border-slate-900 bg-white/90 dark:bg-slate-950/70 backdrop-blur-md transition-colors duration-200">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        <a
-          href="/"
+        <Link
+          to="/"
           className="flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900 dark:text-white font-display hover:opacity-90 transition-opacity"
         >
           <div className="p-2 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30">
@@ -154,7 +154,7 @@ function Navbar() {
           <span>
             Watch<span className="text-indigo-500 dark:text-indigo-400">2</span>Gether
           </span>
-        </a>
+        </Link>
 
         <div className="flex items-center gap-3">
           {/* Theme Toggle Button */}

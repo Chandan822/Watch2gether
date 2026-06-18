@@ -119,7 +119,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   // 4. Log Out Session
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
     } catch (err) {
@@ -129,7 +129,43 @@ export const AuthProvider = ({ children }) => {
       setAccessToken(null);
       setUser(null);
     }
-  };
+  }, [API_URL]);
+
+  // Inactivity Auto-Logout (15 minutes of inactivity)
+  useEffect(() => {
+    if (!user) return;
+
+    // Timeout duration: 15 minutes (900000 ms)
+    const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
+    let timer;
+
+    const performLogout = () => {
+      console.log('User logged out due to inactivity.');
+      logout();
+      alert('You have been logged out due to inactivity.');
+    };
+
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(performLogout, INACTIVITY_TIMEOUT);
+    };
+
+    // Events to track user activity
+    const activityEvents = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+
+    resetTimer();
+
+    activityEvents.forEach((event) => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      activityEvents.forEach((event) => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [user, logout]);
 
   /**
    * Fetch Wrapper with Automated Token Interceptor

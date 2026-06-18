@@ -15,7 +15,7 @@ export default function Signup() {
 
   useEffect(() => {
     if (user) {
-      navigate('/', { replace: true });
+      navigate('/lobby', { replace: true });
     }
   }, [user, navigate]);
 
@@ -28,7 +28,7 @@ export default function Signup() {
 
     try {
       await register(username.trim(), email.trim(), password);
-      navigate('/', { replace: true });
+      navigate('/lobby', { replace: true });
     } catch (err) {
       console.error(err);
       setError(err.message || 'Registration failed. Try a different username/email.');

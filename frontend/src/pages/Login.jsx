@@ -14,7 +14,7 @@ export default function Login() {
 
   useEffect(() => {
     if (user) {
-      navigate('/', { replace: true });
+      navigate('/lobby', { replace: true });
     }
   }, [user, navigate]);
 
@@ -27,7 +27,7 @@ export default function Login() {
 
     try {
       await login(username.trim(), password);
-      navigate('/', { replace: true });
+      navigate('/lobby', { replace: true });
     } catch (err) {
       console.error(err);
       setError(err.message || 'Invalid username or password');

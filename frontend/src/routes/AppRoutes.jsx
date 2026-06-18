@@ -5,6 +5,7 @@ import Room from '../pages/Room.jsx';
 import Login from '../pages/Login.jsx';
 import Signup from '../pages/Signup.jsx';
 import Profile from '../pages/Profile.jsx';
+import Landing from '../pages/Landing.jsx';
 
 /**
  * Protected Route Wrapper
@@ -38,13 +39,16 @@ const ProtectedRoute = ({ children }) => {
 export const AppRoutes = () => {
   return (
     <Routes>
+      {/* Public Landing Page */}
+      <Route path="/" element={<Landing />} />
+
       {/* Auth Forms */}
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
 
       {/* Protected Routes */}
       <Route
-        path="/"
+        path="/lobby"
         element={
           <ProtectedRoute>
             <Lobby />
