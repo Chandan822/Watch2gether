@@ -1,3 +1,5 @@
+import { YoutubeTranscript } from 'youtube-transcript';
+
 /**
  * Call the Google Gemini API to generate content.
  * Uses the built-in global fetch to make direct REST API requests to Gemini 1.5 Flash.
@@ -47,12 +49,47 @@ export const callGemini = async (prompt) => {
 };
 
 /**
+ * Extract YouTube Video ID from a URL.
+ */
+export const getYouTubeId = (url) => {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+};
+
+/**
+ * Fetch YouTube Video Transcript.
+ */
+export const fetchYouTubeTranscript = async (videoUrl) => {
+  const videoId = getYouTubeId(videoUrl);
+  if (!videoId) return null;
+
+  try {
+    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+    return transcript.map((t) => t.text).join(' ');
+  } catch (err) {
+    console.warn(`[Transcript] Failed to fetch transcript for videoId ${videoId}:`, err.message);
+    return null;
+  }
+};
+
+/**
  * Generate a video summary.
  */
 export const generateVideoSummary = async (videoTitle, videoUrl) => {
-  const prompt = `You are an expert educational AI assistant.
-Summarize the video titled "${videoTitle}" (URL: ${videoUrl || 'Not Provided'}).
-Provide a concise, highly-structured, and clear summary highlighting:
+  const transcriptText = await fetchYouTubeTranscript(videoUrl);
+
+  let prompt = `You are an expert educational AI assistant.
+Summarize the video titled "${videoTitle}" (URL: ${videoUrl || 'Not Provided'}).`;
+
+  if (transcriptText) {
+    prompt += `\n\nHere is the full transcript of the video to use as context for your summary:\n${transcriptText}\n\n`;
+  } else {
+    prompt += `\n\n(No transcript is available for this video, please generate the summary based on the title and context.)\n\n`;
+  }
+
+  prompt += `Provide a concise, highly-structured, and clear summary highlighting:
 - The core premise/main idea
 - 3 to 4 key concepts or main topics covered
 - Educational takeaway / practical applications
@@ -66,9 +103,16 @@ Format the output in clean, readable Markdown. Use bullet points and bold titles
  * Generate 3 thought-provoking discussion questions.
  */
 export const generateDiscussionQuestions = async (videoTitle, videoUrl) => {
-  const prompt = `You are an expert educator.
-Based on the video titled "${videoTitle}" (URL: ${videoUrl || 'Not Provided'}), generate exactly 3 thought-provoking, open-ended discussion questions.
-These questions should be designed to help a collaborative study group analyze, critique, and debate the concepts introduced in the video.
+  const transcriptText = await fetchYouTubeTranscript(videoUrl);
+
+  let prompt = `You are an expert educator.
+Based on the video titled "${videoTitle}" (URL: ${videoUrl || 'Not Provided'}), generate exactly 3 thought-provoking, open-ended discussion questions.`;
+
+  if (transcriptText) {
+    prompt += `\n\nHere is the full transcript of the video to use as context for your questions:\n${transcriptText}\n\n`;
+  }
+
+  prompt += `These questions should be designed to help a collaborative study group analyze, critique, and debate the concepts introduced in the video.
 Format the output in a clean, numbered Markdown list. Do not write answers or explanations, only the questions.`;
 
   return await callGemini(prompt);
@@ -78,9 +122,16 @@ Format the output in a clean, numbered Markdown list. Do not write answers or ex
  * Generate a multiple choice quiz (3 questions, 4 options each) in structured JSON.
  */
 export const generateQuiz = async (videoTitle, videoUrl) => {
-  const prompt = `You are a professional quiz builder.
-Based on the video titled "${videoTitle}" (URL: ${videoUrl || 'Not Provided'}), generate a multiple-choice quiz consisting of exactly 3 questions.
-Each question must have exactly 4 choices, with exactly one correct option.
+  const transcriptText = await fetchYouTubeTranscript(videoUrl);
+
+  let prompt = `You are a professional quiz builder.
+Based on the video titled "${videoTitle}" (URL: ${videoUrl || 'Not Provided'}), generate a multiple-choice quiz consisting of exactly 3 questions.`;
+
+  if (transcriptText) {
+    prompt += `\n\nHere is the full transcript of the video to use as context for generating these quiz questions:\n${transcriptText}\n\n`;
+  }
+
+  prompt += `Each question must have exactly 4 choices, with exactly one correct option.
 You MUST respond ONLY with a valid JSON array of objects. Do not include any markdown wrapper or backticks (no \`\`\`json, no \`\`\`). Your output must be parseable by JSON.parse() directly.
 
 The JSON structure must match this exact schema:
@@ -128,12 +179,18 @@ The JSON structure must match this exact schema:
 /**
  * Explain a study topic.
  */
-export const explainStudyTopic = async (videoTitle, query) => {
-  const prompt = `You are a friendly, expert study tutor.
-A student in a collaborative watch lounge studying "${videoTitle}" has asked for an explanation on this specific topic/question:
-"${query}"
+export const explainStudyTopic = async (videoTitle, videoUrl, query) => {
+  const transcriptText = await fetchYouTubeTranscript(videoUrl);
 
-Provide a detailed, clear, and structured educational explanation. Break down complex terms, use bullet points for clarity, and keep the tone helpful, encouraging, and accurate.`;
+  let prompt = `You are a friendly, expert study tutor.
+A student in a collaborative watch lounge studying "${videoTitle}" has asked for an explanation on this specific topic/question:
+"${query}"\n\n`;
+
+  if (transcriptText) {
+    prompt += `Here is the full transcript of the video as context to help answer the question accurately:\n${transcriptText}\n\n`;
+  }
+
+  prompt += `Provide a detailed, clear, and structured educational explanation. Break down complex terms, use bullet points for clarity, and keep the tone helpful, encouraging, and accurate.`;
 
   return await callGemini(prompt);
 };

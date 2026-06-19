@@ -897,7 +897,7 @@ router.post('/:id/ai/quiz', async (req, res, next) => {
 router.post('/:id/ai/explain', async (req, res, next) => {
   try {
     const roomId = req.params.id;
-    await getAiEnabledRoom(roomId, req.user.id);
+    const room = await getAiEnabledRoom(roomId, req.user.id);
     const { videoTitle, query } = req.body;
 
     if (!query || !query.trim()) {
@@ -908,6 +908,7 @@ router.post('/:id/ai/explain', async (req, res, next) => {
 
     const explanation = await explainStudyTopic(
       videoTitle || 'Current Video',
+      room.videoUrl,
       query.trim()
     );
 

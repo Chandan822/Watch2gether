@@ -88,6 +88,121 @@ export const isUserOnlineInRoom = (userId, roomId) => {
   return [...userSockets].some((socketId) => socketsInRoom.has(socketId));
 };
 
+export const migrateHostRole = async (roomId, leavingUserId) => {
+  try {
+    if (!ioInstance) return;
+
+    // 1. Fetch current members of the room
+    const members = await db
+      .select()
+      .from(roomMembers)
+      .where(eq(roomMembers.roomId, roomId));
+
+    // Check if the leaving user is currently the host
+    const leavingMember = members.find((m) => m.userId === leavingUserId);
+    if (!leavingMember || leavingMember.role !== 'host') return;
+
+    // 2. Find online candidates to promote (excluding guests and the leaving user)
+    const onlineCandidates = [];
+    for (const m of members) {
+      if (m.userId === leavingUserId) continue;
+      if (m.role === 'guest') continue;
+
+      const online = isUserOnlineInRoom(m.userId, roomId);
+      if (online) {
+        onlineCandidates.push(m);
+      }
+    }
+
+    if (onlineCandidates.length === 0) return;
+
+    // Prioritize co-hosts over regular members
+    onlineCandidates.sort((a, b) => {
+      const score = { 'co-host': 1, 'member': 2 };
+      return (score[a.role] || 3) - (score[b.role] || 3);
+    });
+
+    const candidateToPromote = onlineCandidates[0];
+
+    // 3. Update database
+    // Demote leaving host to 'member'
+    await db
+      .update(roomMembers)
+      .set({ role: 'member' })
+      .where(
+        and(
+          eq(roomMembers.roomId, roomId),
+          eq(roomMembers.userId, leavingUserId)
+        )
+      );
+
+    // Promote new host
+    await db
+      .update(roomMembers)
+      .set({ role: 'host' })
+      .where(
+        and(
+          eq(roomMembers.roomId, roomId),
+          eq(roomMembers.userId, candidateToPromote.userId)
+        )
+      );
+
+    // 4. Send socket notifications
+    const [promotedUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, candidateToPromote.userId))
+      .limit(1);
+
+    const [leavingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, leavingUserId))
+      .limit(1);
+
+    if (promotedUser) {
+      // Emit role change updates
+      ioInstance.to(roomId).emit('user-role-changed', { userId: leavingUserId, role: 'member' });
+      ioInstance.to(roomId).emit('user-role-changed', { userId: candidateToPromote.userId, role: 'host' });
+
+      // Emit system message
+      ioInstance.to(roomId).emit('message-received', {
+        id: Math.random().toString(),
+        username: 'System',
+        content: `${leavingUser?.username || 'Host'} left the room. ${promotedUser.username} is now the Host.`,
+        createdAt: new Date(),
+      });
+
+      // Fetch active users in room and broadcast to all room members
+      const activeMembers = await db
+        .select({
+          id: users.id,
+          username: users.username,
+          role: roomMembers.role,
+        })
+        .from(roomMembers)
+        .innerJoin(users, eq(roomMembers.userId, users.id))
+        .where(eq(roomMembers.roomId, roomId));
+
+      const seenUserIds = new Set();
+      const activeMembersWithStatus = [];
+      for (const member of activeMembers) {
+        if (!seenUserIds.has(member.id)) {
+          seenUserIds.add(member.id);
+          activeMembersWithStatus.push({
+            ...member,
+            isOnline: isUserOnlineInRoom(member.id, roomId),
+          });
+        }
+      }
+
+      ioInstance.to(roomId).emit('room-users-update', activeMembersWithStatus);
+    }
+  } catch (error) {
+    console.error('❌ Error in migrateHostRole:', error);
+  }
+};
+
 /**
  * Fetch all polls for a room along with options and votes count.
  */
@@ -236,6 +351,55 @@ export const initSocketService = (io) => {
             .returning();
         }
 
+        // Fetch room record to check for owner and video state
+        const [roomRecord] = await db
+          .select()
+          .from(rooms)
+          .where(eq(rooms.id, roomId))
+          .limit(1);
+
+        // Check if this joining user is the original owner/creator of the room
+        if (roomRecord && currentUserId === roomRecord.ownerId) {
+          // If another user was promoted to host, demote them back to member
+          const otherHosts = await db
+            .select()
+            .from(roomMembers)
+            .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.role, 'host')));
+
+          const otherHost = otherHosts.find((m) => m.userId !== currentUserId);
+          if (otherHost) {
+            await db
+              .update(roomMembers)
+              .set({ role: 'member' })
+              .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, otherHost.userId)));
+
+            io.to(roomId).emit('user-role-changed', { userId: otherHost.userId, role: 'member' });
+          }
+
+          // Promote the owner back to host if not already
+          if (memberRecord.role !== 'host') {
+            const [updatedMember] = await db
+              .update(roomMembers)
+              .set({ role: 'host' })
+              .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, currentUserId)))
+              .returning();
+            
+            if (updatedMember) {
+              memberRecord = updatedMember;
+            }
+
+            io.to(roomId).emit('user-role-changed', { userId: currentUserId, role: 'host' });
+
+            // Send system message
+            io.to(roomId).emit('message-received', {
+              id: Math.random().toString(),
+              username: 'System',
+              content: `${username} (Original Host) has returned and resumed the Host role.`,
+              createdAt: new Date(),
+            });
+          }
+        }
+
         currentMemberId = memberRecord.id;
 
         // Check if user has other tabs/connections in this room
@@ -283,12 +447,6 @@ export const initSocketService = (io) => {
         }
 
         // Send current estimated video state
-        const [roomRecord] = await db
-          .select()
-          .from(rooms)
-          .where(eq(rooms.id, roomId))
-          .limit(1);
-
         if (roomRecord) {
           let estimatedTime = roomRecord.videoTime;
           if (roomRecord.videoState === 'play') {
@@ -1037,6 +1195,9 @@ export const initSocketService = (io) => {
             );
           }
 
+          // Migrate host role if this user is leaving and is currently the host
+          await migrateHostRole(currentRoomId, currentUserId);
+
           // Delete all membership records for this user in this room to clear duplicates
           await db
             .delete(roomMembers)
@@ -1325,6 +1486,15 @@ export const initSocketService = (io) => {
     });
 
     // ── Collaborative Whiteboard Handlers ─────────────────────────────────────
+    socket.on('whiteboard-init', ({ roomId }) => {
+      try {
+        const boardHistory = whiteboardSessions.get(roomId) || [];
+        socket.emit('whiteboard-init', boardHistory);
+      } catch (error) {
+        console.error('❌ Socket whiteboard-init error:', error);
+      }
+    });
+
     socket.on('whiteboard-action', (action) => {
       try {
         if (!currentRoomId) return;
@@ -1338,6 +1508,39 @@ export const initSocketService = (io) => {
         socket.to(currentRoomId).emit('whiteboard-action', action);
       } catch (error) {
         console.error('❌ Socket whiteboard-action error:', error);
+      }
+    });
+
+    socket.on('whiteboard-undo', ({ strokeId }) => {
+      try {
+        if (!currentRoomId || !strokeId) return;
+
+        if (whiteboardSessions.has(currentRoomId)) {
+          const updated = whiteboardSessions.get(currentRoomId).filter(
+            (action) => action.strokeId !== strokeId
+          );
+          whiteboardSessions.set(currentRoomId, updated);
+        }
+
+        io.to(currentRoomId).emit('whiteboard-undo', { strokeId });
+      } catch (error) {
+        console.error('❌ Socket whiteboard-undo error:', error);
+      }
+    });
+
+    socket.on('whiteboard-redo', (actions) => {
+      try {
+        if (!currentRoomId || !actions || !Array.isArray(actions)) return;
+
+        if (!whiteboardSessions.has(currentRoomId)) {
+          whiteboardSessions.set(currentRoomId, []);
+        }
+        whiteboardSessions.get(currentRoomId).push(...actions);
+
+        // Broadcast redone actions to other attendees in the room
+        socket.to(currentRoomId).emit('whiteboard-redo', actions);
+      } catch (error) {
+        console.error('❌ Socket whiteboard-redo error:', error);
       }
     });
 
@@ -1528,6 +1731,9 @@ export const initSocketService = (io) => {
 
       if (currentRoomId && currentUserId) {
         try {
+          // Migrate host role if this user was the host and is disconnecting
+          await migrateHostRole(currentRoomId, currentUserId);
+
           // Do NOT delete the roomMembers record!
           const isStillOnlineInRoom = isUserOnlineInRoom(
             currentUserId,

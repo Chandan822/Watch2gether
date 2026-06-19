@@ -8,7 +8,13 @@ import {
   Type, 
   Trash2, 
   Eye, 
-  Info
+  Info,
+  Undo2,
+  Redo2,
+  MousePointer,
+  Move,
+  Check,
+  X
 } from 'lucide-react';
 
 // Curated modern color palette
@@ -26,15 +32,37 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
 
   // Refs
   const canvasRef = useRef(null);
+  const gridCanvasRef = useRef(null);
   const previewCanvasRef = useRef(null);
   const containerRef = useRef(null);
   const actionsRef = useRef([]); // Holds drawing actions history
 
   // Whiteboard States
-  const [tool, setTool] = useState('pen'); // 'pen' | 'eraser' | 'rect' | 'circle' | 'line' | 'text'
+  const [tool, setTool] = useState('pen'); // 'pen' | 'eraser' | 'rect' | 'circle' | 'line' | 'text' | 'select'
   const [color, setColor] = useState('#ffffff');
   const [lineWidth, setLineWidth] = useState(4);
   const [fontSize, setFontSize] = useState(16);
+  const [showGrid, setShowGrid] = useState(true);
+
+  // Selection state
+  const [selectedActionId, setSelectedActionId] = useState(null);
+  const selectedActionRef = useRef(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const initialActionPosRef = useRef({ x: 0, y: 0 });
+
+  // Undo / Redo Local Stacks (using refs to avoid stale state in handlers)
+  const undoStackRef = useRef([]); // Array of { strokeId, actions }
+  const redoStackRef = useRef([]); // Array of { strokeId, actions }
+  const currentStrokeActionsRef = useRef([]); // Array of segments for current stroke
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  // Text insertion state
+  const [textInput, setTextInput] = useState(null); // { x, y, value: '' }
+  const textInputRef = useRef(null);
+  const isDraggingActiveInputRef = useRef(false);
+  const activeInputStartOffsetRef = useRef({ x: 0, y: 0 });
+  const editingActionRef = useRef(null); // Holds the text action currently being edited
 
   // Drawing Internal Tracking Refs
   const isDrawingRef = useRef(false);
@@ -43,10 +71,6 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
   const startXRef = useRef(0);
   const startYRef = useRef(0);
   const strokeIdRef = useRef(null);
-
-  // Text insertion state
-  const [textInput, setTextInput] = useState(null); // { x, y, value: '' }
-  const textInputRef = useRef(null);
 
   // Helper: Draw subtle grid background
   const drawGrid = (ctx, width, height) => {
@@ -68,6 +92,20 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
       ctx.stroke();
     }
     ctx.restore();
+  };
+
+  // Redraw grid background canvas
+  const redrawGrid = () => {
+    const canvas = gridCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+    if (showGrid) {
+      drawGrid(ctx, w, h);
+    }
   };
 
   // Draw a single action onto a canvas context
@@ -121,7 +159,7 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     ctx.restore();
   };
 
-  // Redraw the entire canvas
+  // Redraw the entire drawing canvas
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -130,10 +168,25 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     const h = canvas.height;
 
     ctx.clearRect(0, 0, w, h);
-    drawGrid(ctx, w, h);
 
     actionsRef.current.forEach((action) => {
       drawAction(ctx, action, w, h);
+
+      // Draw dashed selection border if selected
+      if (action.type === 'text' && action.strokeId === selectedActionId) {
+        ctx.save();
+        ctx.strokeStyle = '#6366f1'; // indigo-500
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+
+        const tx = action.x * w;
+        const ty = action.y * h;
+        const height = action.fontSize || 16;
+        const width = action.text.length * (height * 0.6);
+
+        ctx.strokeRect(tx - 6, ty - 6, width + 12, height + 12);
+        ctx.restore();
+      }
     });
   };
 
@@ -142,7 +195,8 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     const previewCanvas = previewCanvasRef.current;
-    if (!container || !canvas || !previewCanvas) return;
+    const gridCanvas = gridCanvasRef.current;
+    if (!container || !canvas || !previewCanvas || !gridCanvas) return;
 
     // Calculate dimensions maintaining 16:9 aspect ratio
     const width = container.clientWidth;
@@ -153,9 +207,24 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     canvas.height = height;
     previewCanvas.width = width;
     previewCanvas.height = height;
+    gridCanvas.width = width;
+    gridCanvas.height = height;
 
+    redrawGrid();
     redrawCanvas();
   };
+
+  // Re-draw grid when showGrid state changes
+  useEffect(() => {
+    redrawGrid();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGrid]);
+
+  // Re-draw canvas when selectedActionId changes
+  useEffect(() => {
+    redrawCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedActionId]);
 
   // Initialize socket listeners and canvas sizing
   useEffect(() => {
@@ -169,16 +238,41 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     });
 
     socket.on('whiteboard-action', (action) => {
-      actionsRef.current.push(action);
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        drawAction(ctx, action, canvas.width, canvas.height);
+      // If action is updated text (moves existing action), replace it in registry
+      const existingIdx = actionsRef.current.findIndex((act) => act.strokeId === action.strokeId);
+      if (existingIdx !== -1) {
+        actionsRef.current[existingIdx] = action;
+      } else {
+        actionsRef.current.push(action);
       }
+      redrawCanvas();
+    });
+
+    socket.on('whiteboard-undo', ({ strokeId }) => {
+      actionsRef.current = actionsRef.current.filter((act) => act.strokeId !== strokeId);
+      // Remove from local undo stack if it came from us
+      undoStackRef.current = undoStackRef.current.filter((item) => item.strokeId !== strokeId);
+      setCanUndo(undoStackRef.current.length > 0);
+      if (selectedActionId === strokeId) {
+        setSelectedActionId(null);
+        selectedActionRef.current = null;
+      }
+      redrawCanvas();
+    });
+
+    socket.on('whiteboard-redo', (actions) => {
+      actionsRef.current.push(...actions);
+      redrawCanvas();
     });
 
     socket.on('whiteboard-clear', () => {
       actionsRef.current = [];
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setSelectedActionId(null);
+      selectedActionRef.current = null;
+      setCanUndo(false);
+      setCanRedo(false);
       redrawCanvas();
     });
 
@@ -190,14 +284,73 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
       socket.off('whiteboard-init');
       socket.off('whiteboard-action');
       socket.off('whiteboard-clear');
+      socket.off('whiteboard-undo');
+      socket.off('whiteboard-redo');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, socket]);
+  }, [roomId, socket, selectedActionId]);
+
+  // Undo / Redo Handlers
+  const handleUndo = () => {
+    if (undoStackRef.current.length === 0) return;
+
+    const item = undoStackRef.current.pop();
+    redoStackRef.current.push(item);
+
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(true);
+
+    // Emit undo event
+    socket.emit('whiteboard-undo', { strokeId: item.strokeId });
+
+    // Update local canvas
+    actionsRef.current = actionsRef.current.filter((act) => act.strokeId !== item.strokeId);
+    redrawCanvas();
+  };
+
+  const handleRedo = () => {
+    if (redoStackRef.current.length === 0) return;
+
+    const item = redoStackRef.current.pop();
+    undoStackRef.current.push(item);
+
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+
+    // Emit redo event to server (which broadcasts and appends to room history)
+    socket.emit('whiteboard-redo', item.actions);
+
+    // Update local canvas
+    actionsRef.current.push(...item.actions);
+    redrawCanvas();
+  };
+
+  // Handle Keyboard Shortcuts for Undo/Redo
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (isGuest) return;
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          handleUndo();
+        } else if (e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          handleRedo();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGuest]);
 
   // Handle Text inputs commit
   const commitText = () => {
     if (!textInput || !textInput.value.trim()) {
-      setTextInput(null);
+      handleCancelText();
       return;
     }
 
@@ -207,8 +360,15 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
       x: textInput.x,
       y: textInput.y,
       color,
-      fontSize
+      fontSize,
+      strokeId: strokeIdRef.current || Math.random().toString(36).substring(2, 9)
     };
+
+    // If we are saving an edit to an existing text action, clear the old one first
+    if (editingActionRef.current) {
+      socket.emit('whiteboard-undo', { strokeId: editingActionRef.current.strokeId });
+      undoStackRef.current = undoStackRef.current.filter((item) => item.strokeId !== editingActionRef.current.strokeId);
+    }
 
     // Commit locally
     actionsRef.current.push(action);
@@ -221,13 +381,33 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     // Broadcast
     socket.emit('whiteboard-action', action);
     setTextInput(null);
+    editingActionRef.current = null;
+
+    // Push to undo stack
+    undoStackRef.current.push({
+      strokeId: action.strokeId,
+      actions: [action]
+    });
+    redoStackRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  };
+
+  const handleCancelText = () => {
+    if (editingActionRef.current) {
+      // Restore original action
+      actionsRef.current.push(editingActionRef.current);
+      editingActionRef.current = null;
+      redrawCanvas();
+    }
+    setTextInput(null);
   };
 
   const handleTextKeyDown = (e) => {
     if (e.key === 'Enter') {
       commitText();
     } else if (e.key === 'Escape') {
-      setTextInput(null);
+      handleCancelText();
     }
   };
 
@@ -253,6 +433,80 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     };
   };
 
+  // Hit testing for text actions
+  const findTextActionAt = (x, y, w, h) => {
+    for (let i = actionsRef.current.length - 1; i >= 0; i--) {
+      const action = actionsRef.current[i];
+      if (action.type === 'text') {
+        const tx = action.x * w;
+        const ty = action.y * h;
+        const height = action.fontSize || 16;
+        const width = action.text.length * (height * 0.6);
+
+        if (
+          x >= tx - 6 &&
+          x <= tx + width + 6 &&
+          y >= ty - 6 &&
+          y <= ty + height + 6
+        ) {
+          return { action, index: i };
+        }
+      }
+    }
+    return null;
+  };
+
+  // Active Input Dragging handler
+  const handleActiveInputDragStart = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    const currentAbsX = textInput.x * canvas.width;
+    const currentAbsY = textInput.y * canvas.height;
+
+    activeInputStartOffsetRef.current = {
+      x: clickX - currentAbsX,
+      y: clickY - currentAbsY
+    };
+
+    isDraggingActiveInputRef.current = true;
+
+    const handleWindowMouseMove = (moveEv) => {
+      if (!isDraggingActiveInputRef.current) return;
+      const currentRect = canvas.getBoundingClientRect();
+      const curX = moveEv.clientX - currentRect.left;
+      const curY = moveEv.clientY - currentRect.top;
+
+      const newAbsX = curX - activeInputStartOffsetRef.current.x;
+      const newAbsY = curY - activeInputStartOffsetRef.current.y;
+
+      setTextInput((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          x: Math.max(0, Math.min(1, newAbsX / canvas.width)),
+          y: Math.max(0, Math.min(1, newAbsY / canvas.height))
+        };
+      });
+    };
+
+    const handleWindowMouseUp = () => {
+      isDraggingActiveInputRef.current = false;
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+  };
+
   // Mouse / Touch handlers for drawing interaction
   const handleStart = (e) => {
     if (isGuest) return;
@@ -268,7 +522,34 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     const normX = coords.x / canvas.width;
     const normY = coords.y / canvas.height;
 
+    if (tool === 'select') {
+      const hit = findTextActionAt(coords.x, coords.y, canvas.width, canvas.height);
+      if (hit) {
+        selectedActionRef.current = hit.action;
+        setSelectedActionId(hit.action.strokeId);
+
+        const currentAbsX = hit.action.x * canvas.width;
+        const currentAbsY = hit.action.y * canvas.height;
+        dragOffsetRef.current = {
+          x: coords.x - currentAbsX,
+          y: coords.y - currentAbsY
+        };
+
+        initialActionPosRef.current = {
+          x: hit.action.x,
+          y: hit.action.y
+        };
+
+        isDrawingRef.current = true;
+      } else {
+        setSelectedActionId(null);
+        selectedActionRef.current = null;
+      }
+      return;
+    }
+
     if (tool === 'text') {
+      strokeIdRef.current = Math.random().toString(36).substring(2, 9);
       setTextInput({ x: normX, y: normY, value: '' });
       setTimeout(() => textInputRef.current?.focus(), 50);
       return;
@@ -280,15 +561,69 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
     startXRef.current = coords.x;
     startYRef.current = coords.y;
     strokeIdRef.current = Math.random().toString(36).substring(2, 9);
+    currentStrokeActionsRef.current = [];
+  };
+
+  const handleDoubleClick = (e) => {
+    if (isGuest) return;
+    const coords = getCoordinates(e);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const hit = findTextActionAt(coords.x, coords.y, canvas.width, canvas.height);
+    if (hit) {
+      // Commit any active text if open
+      if (textInput) {
+        commitText();
+      }
+
+      // Enter edit mode for existing text
+      editingActionRef.current = hit.action;
+      strokeIdRef.current = hit.action.strokeId;
+      setTextInput({ x: hit.action.x, y: hit.action.y, value: hit.action.text });
+
+      // Temporarily remove the text from rendering
+      actionsRef.current = actionsRef.current.filter((act) => act.strokeId !== hit.action.strokeId);
+      setSelectedActionId(null);
+      selectedActionRef.current = null;
+      redrawCanvas();
+
+      setTimeout(() => {
+        if (textInputRef.current) {
+          textInputRef.current.focus();
+          textInputRef.current.select();
+        }
+      }, 50);
+    }
   };
 
   const handleMove = (e) => {
-    if (!isDrawingRef.current || isGuest) return;
-
     const coords = getCoordinates(e);
     const canvas = canvasRef.current;
     const previewCanvas = previewCanvasRef.current;
     if (!canvas || !previewCanvas) return;
+
+    if (tool === 'select') {
+      if (isDrawingRef.current && selectedActionRef.current) {
+        const newAbsX = coords.x - dragOffsetRef.current.x;
+        const newAbsY = coords.y - dragOffsetRef.current.y;
+
+        selectedActionRef.current.x = Math.max(0, Math.min(1, newAbsX / canvas.width));
+        selectedActionRef.current.y = Math.max(0, Math.min(1, newAbsY / canvas.height));
+
+        redrawCanvas();
+      } else {
+        const hit = findTextActionAt(coords.x, coords.y, canvas.width, canvas.height);
+        if (hit) {
+          previewCanvas.style.cursor = 'pointer';
+        } else {
+          previewCanvas.style.cursor = 'default';
+        }
+      }
+      return;
+    }
+
+    if (!isDrawingRef.current || isGuest) return;
 
     const ctx = canvas.getContext('2d');
     const pCtx = previewCanvas.getContext('2d');
@@ -322,6 +657,7 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
 
       // Append locally
       actionsRef.current.push(segmentAction);
+      currentStrokeActionsRef.current.push(segmentAction);
 
       // Update pointer
       lastXRef.current = coords.x;
@@ -357,6 +693,27 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
   };
 
   const handleEnd = (e) => {
+    if (tool === 'select') {
+      if (isDrawingRef.current && selectedActionRef.current) {
+        isDrawingRef.current = false;
+        const action = selectedActionRef.current;
+        const initialPos = initialActionPosRef.current;
+
+        if (action.x !== initialPos.x || action.y !== initialPos.y) {
+          // Sync with everyone by undoing old stroke and emitting updated position
+          socket.emit('whiteboard-undo', { strokeId: action.strokeId });
+          socket.emit('whiteboard-action', action);
+
+          // Update reference inside local undo stack
+          const undoItem = undoStackRef.current.find((item) => item.strokeId === action.strokeId);
+          if (undoItem) {
+            undoItem.actions = [action];
+          }
+        }
+      }
+      return;
+    }
+
     if (!isDrawingRef.current || isGuest) return;
     isDrawingRef.current = false;
 
@@ -389,7 +746,8 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
         endX: coords.x / w,
         endY: coords.y / h,
         color,
-        width: lineWidth
+        width: lineWidth,
+        strokeId: strokeIdRef.current
       };
 
       // Draw locally on main canvas
@@ -400,6 +758,26 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
 
       // Append locally
       actionsRef.current.push(shapeAction);
+
+      // Save to undo stack
+      undoStackRef.current.push({
+        strokeId: shapeAction.strokeId,
+        actions: [shapeAction]
+      });
+      redoStackRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+    } else {
+      // Freehand drawing stroke ended
+      if (currentStrokeActionsRef.current.length > 0) {
+        undoStackRef.current.push({
+          strokeId: strokeIdRef.current,
+          actions: [...currentStrokeActionsRef.current]
+        });
+        redoStackRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+      }
     }
   };
 
@@ -413,51 +791,87 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
 
   return (
     <div className="flex flex-col space-y-4 w-full">
-      {/* Upper info panel / Guest notification */}
-      <div className="flex items-center justify-between bg-white dark:bg-slate-900/30 border border-slate-200 dark:border-slate-900 px-4 py-3 rounded-2xl">
+      {/* Upper info panel / Guest notification & Grid Options */}
+      <div className="flex items-center justify-between bg-white dark:bg-slate-900/30 border border-slate-200 dark:border-slate-900 px-4 py-3 rounded-2xl gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <Info className="w-4 h-4 text-indigo-500 dark:text-indigo-400 shrink-0" />
           <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">
             {isGuest 
               ? 'Viewing collaborative whiteboard. Guests do not have edit rights.' 
-              : 'Collaborate in real-time. Use tools, geometric shapes, and add text.'}
+              : 'Collaborate in real-time. Use tools, select / double-click text to edit.'}
           </span>
         </div>
-        {isGuest ? (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-lg text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-500">
-            <Eye className="w-3.5 h-3.5" />
-            Read Only
-          </span>
-        ) : (
-          <button
-            onClick={handleClear}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 border border-rose-200 dark:border-rose-900/30 text-rose-500 dark:text-rose-400 hover:text-rose-700 dark:hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear Board
-          </button>
-        )}
+
+        <div className="flex items-center gap-3">
+          {/* Grid vs Plain Toggle */}
+          <div className="flex bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 p-0.5 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setShowGrid(false)}
+              className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                !showGrid
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Plain
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowGrid(true)}
+              className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                showGrid
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Grid
+            </button>
+          </div>
+
+          {isGuest ? (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-lg text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-500">
+              <Eye className="w-3.5 h-3.5" />
+              Read Only
+            </span>
+          ) : (
+            <button
+              onClick={handleClear}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 border border-rose-200 dark:border-rose-900/30 text-rose-500 dark:text-rose-455 hover:text-rose-700 dark:hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear Board
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Canvas Workstation Container */}
       <div 
         ref={containerRef} 
-        className="relative aspect-video rounded-3xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 shadow-2xl flex items-center justify-center w-full group/canvas select-none"
+        className="relative aspect-video rounded-3xl overflow-hidden shadow-2xl flex items-center justify-center w-full group/canvas select-none"
       >
+        {/* Grid Canvas Background Layer */}
+        <canvas
+          ref={gridCanvasRef}
+          className="absolute inset-0 z-0 bg-slate-100 dark:bg-slate-950"
+        />
+
         {/* Main Drawings Canvas */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 z-0 bg-slate-100 dark:bg-slate-950"
+          className="absolute inset-0 z-10 bg-transparent"
         />
 
         {/* Temporary Overlays / Shapes Preview Canvas */}
         <canvas
           ref={previewCanvasRef}
-          className={`absolute inset-0 z-10 ${isGuest ? 'cursor-not-allowed' : 'cursor-crosshair'}`}
+          className={`absolute inset-0 z-20 ${isGuest ? 'cursor-not-allowed' : 'cursor-crosshair'}`}
           onMouseDown={handleStart}
           onMouseMove={handleMove}
           onMouseUp={handleEnd}
           onMouseLeave={handleEnd}
+          onDoubleClick={handleDoubleClick}
           onTouchStart={handleStart}
           onTouchMove={handleMove}
           onTouchEnd={handleEnd}
@@ -466,24 +880,48 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
         {/* Text Area Overlay Input */}
         {textInput && (
           <div 
-            className="absolute z-20"
+            className="absolute z-30 flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5 shadow-2xl gap-1.5"
             style={{ 
               top: `${textInput.y * 100}%`, 
               left: `${textInput.x * 100}%`,
               transform: 'translateY(-2px)' 
             }}
           >
+            {/* Drag Handle */}
+            <div 
+              className="cursor-move text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-350 p-0.5 shrink-0"
+              onMouseDown={handleActiveInputDragStart}
+              title="Drag to Move"
+            >
+              <Move className="w-3.5 h-3.5" />
+            </div>
             <input
               ref={textInputRef}
               type="text"
               value={textInput.value}
               onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
               onKeyDown={handleTextKeyDown}
-              onBlur={commitText}
-              placeholder="Press Enter to save..."
+              placeholder="Type something..."
               style={{ color, fontSize: `${fontSize}px` }}
-              className="bg-slate-900/90 border border-indigo-500 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xl text-xs min-w-[150px] font-medium"
+              className="bg-transparent border-none outline-none focus:ring-0 text-xs text-slate-850 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-650 min-w-[120px] font-medium p-0"
             />
+            {/* Action Buttons */}
+            <button
+              type="button"
+              onClick={commitText}
+              className="text-emerald-600 hover:text-emerald-500 dark:text-emerald-500 dark:hover:text-emerald-400 p-0.5 cursor-pointer shrink-0"
+              title="Save (Enter)"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelText}
+              className="text-rose-600 hover:text-rose-500 dark:text-rose-500 dark:hover:text-rose-455 p-0.5 cursor-pointer shrink-0"
+              title="Cancel (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
       </div>
@@ -491,68 +929,114 @@ export default function Whiteboard({ roomId, socket, userRole = 'member' }) {
       {/* Floating Toolbar Panel (Only visible for non-guests) */}
       {!isGuest && (
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-white dark:bg-slate-900/20 border border-slate-200 dark:border-slate-900 rounded-3xl backdrop-blur-sm">
-          {/* Tool selector buttons */}
-          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-900">
-            <button
-              type="button"
-              onClick={() => setTool('pen')}
-              title="Pen/Draw Tool"
-              className={`p-2 rounded-lg transition-all cursor-pointer ${
-                tool === 'pen' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Paintbrush className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool('eraser')}
-              title="Eraser Tool"
-              className={`p-2 rounded-lg transition-all cursor-pointer ${
-                tool === 'eraser' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Eraser className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool('line')}
-              title="Line Shape"
-              className={`p-2 rounded-lg transition-all cursor-pointer ${
-                tool === 'line' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Minus className="w-4 h-4 rotate-45" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool('rect')}
-              title="Rectangle Shape"
-              className={`p-2 rounded-lg transition-all cursor-pointer ${
-                tool === 'rect' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Square className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool('circle')}
-              title="Circle Shape"
-              className={`p-2 rounded-lg transition-all cursor-pointer ${
-                tool === 'circle' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
-              }`}
-            >
-              <CircleIcon className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool('text')}
-              title="Add Text overlay"
-              className={`p-2 rounded-lg transition-all cursor-pointer ${
-                tool === 'text' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Type className="w-4 h-4" />
-            </button>
+          {/* Tool selector & Undo/Redo buttons */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-900">
+              <button
+                type="button"
+                onClick={() => {
+                  setTool('select');
+                  setSelectedActionId(null);
+                  selectedActionRef.current = null;
+                }}
+                title="Select & Move Tool"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'select' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <MousePointer className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('pen')}
+                title="Pen/Draw Tool"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'pen' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <Paintbrush className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('eraser')}
+                title="Eraser Tool"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'eraser' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <Eraser className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('line')}
+                title="Line Shape"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'line' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <Minus className="w-4 h-4 rotate-45" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('rect')}
+                title="Rectangle Shape"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'rect' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <Square className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('circle')}
+                title="Circle Shape"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'circle' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <CircleIcon className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool('text')}
+                title="Add Text overlay"
+                className={`p-2 rounded-lg transition-all cursor-pointer ${
+                  tool === 'text' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900'
+                }`}
+              >
+                <Type className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Undo / Redo Group */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                className={`p-2 rounded-xl transition-all cursor-pointer border ${
+                  canUndo
+                    ? 'text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900/60'
+                    : 'text-slate-300 dark:text-slate-850 border-transparent cursor-not-allowed'
+                }`}
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Y)"
+                className={`p-2 rounded-xl transition-all cursor-pointer border ${
+                  canRedo
+                    ? 'text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900/60'
+                    : 'text-slate-300 dark:text-slate-850 border-transparent cursor-not-allowed'
+                }`}
+              >
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Color palette selector */}
