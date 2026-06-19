@@ -790,6 +790,23 @@ export default function Room() {
     }
   };
 
+  const handleRemoveVideo = () => {
+    if (!isHostOrCoHost) return;
+    if (!confirm('Are you sure you want to remove the current video?')) return;
+
+    setVideoError('');
+    setRoomData((prev) => (prev ? { ...prev, videoUrl: '' } : null));
+    setVideoUrlInput('');
+    setIsPlaying(false);
+
+    socket.emit('video-state-change', {
+      action: 'pause',
+      time: 0,
+      videoUrl: '',
+    });
+  };
+
+
   
   const handlePlay = () => {
     if (!isHostOrCoHost || isIncomingSync.current) return;
@@ -1493,12 +1510,23 @@ export default function Room() {
                     <button
                       type="button"
                       onClick={handleDeleteUploadedVideo}
-                      className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/35 border border-rose-200 dark:border-rose-900/30 text-rose-600 dark:text-rose-450 hover:text-rose-700 dark:hover:text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
+                      className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/35 border border-rose-200 dark:border-rose-900/30 text-rose-600 dark:text-rose-455 hover:text-rose-700 dark:hover:text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Delete Video</span>
                     </button>
                   )}
+                  {roomData?.videoUrl && !roomData.videoUrl.includes('/hls-') && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveVideo}
+                      className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/35 border border-rose-200 dark:border-rose-900/30 text-rose-600 dark:text-rose-455 hover:text-rose-700 dark:hover:text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Remove Video</span>
+                    </button>
+                  )}
+
                   <input
                     type="file"
                     ref={fileInputRef}
