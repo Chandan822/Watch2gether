@@ -117,6 +117,8 @@ export const rooms = pgTable(
     }),
     isAiEnabled: boolean('is_ai_enabled').default(false).notNull(),
     sharedNotes: text('shared_notes').default('').notNull(),
+    sharedCode: text('shared_code').default('// Type your code here...\nconsole.log("Hello, World!");').notNull(),
+    sharedCodeLang: varchar('shared_code_lang', { length: 50 }).default('javascript').notNull(),
     activePdfUrl: text('active_pdf_url'),
     activePdfPage: integer('active_pdf_page').default(1).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),

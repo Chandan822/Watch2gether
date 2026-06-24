@@ -511,6 +511,8 @@ export const initSocketService = (io) => {
         if (roomRecord) {
           socket.emit('study-init', {
             sharedNotes: roomRecord.sharedNotes || '',
+            sharedCode: roomRecord.sharedCode || '',
+            sharedCodeLang: roomRecord.sharedCodeLang || 'javascript',
             activePdfUrl: roomRecord.activePdfUrl || null,
             activePdfPage: roomRecord.activePdfPage || 1,
           });
@@ -1075,6 +1077,49 @@ export const initSocketService = (io) => {
         socket.to(currentRoomId).emit('notes-update', { text });
       } catch (error) {
         console.error('❌ Socket notes-update error:', error);
+      }
+    });
+
+    // Handle Study Mode Shared Code Real-Time Sync
+    socket.on('code-update', async ({ text, lang }) => {
+      try {
+        if (!currentRoomId || !currentUserId) return;
+
+        // Verify membership (guests cannot write code)
+        const [memberRecord] = await db
+          .select()
+          .from(roomMembers)
+          .where(
+            and(
+              eq(roomMembers.roomId, currentRoomId),
+              eq(roomMembers.userId, currentUserId)
+            )
+          )
+          .limit(1);
+
+        if (!memberRecord || memberRecord.role === 'guest') {
+          console.log(
+            `🚫 Code blocked: User "${currentUsername}" (role: "${memberRecord?.role}") is guest.`
+          );
+          return;
+        }
+
+        // Save updated code and language to database
+        const updateData = {};
+        if (text !== undefined) updateData.sharedCode = text;
+        if (lang !== undefined) updateData.sharedCodeLang = lang;
+
+        if (Object.keys(updateData).length > 0) {
+          await db
+            .update(rooms)
+            .set(updateData)
+            .where(eq(rooms.id, currentRoomId));
+        }
+
+        // Broadcast updated code to other room members
+        socket.to(currentRoomId).emit('code-update', { text, lang });
+      } catch (error) {
+        console.error('❌ Socket code-update error:', error);
       }
     });
 
